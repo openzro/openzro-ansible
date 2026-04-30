@@ -78,13 +78,43 @@ install with the same template-driven approach as the other three.
   hosts. The role can optionally generate a self-signed cert for
   dev/lab use — `openzro_self_signed_tls: true`.
 
+## High availability — what works today vs. pending
+
+The four components have different statefulness, so HA support
+varies:
+
+| Component | Stateless? | Multi-replica today? | Notes |
+|---|---|---|---|
+| `signal` | ✅ | ✅ Yes | Drop N hosts in the `signal` group; the cloud LB role distributes traffic. Clients fall over via `Signal.URI` rotation in `management.json`. |
+| `relay` | ✅ | ✅ Yes | Clients learn all relays via `management.json`'s `Relay.Addresses[]` and probe multiple in parallel. Add hosts to the `relay` group; the NLB load-balances. |
+| `dashboard` | ✅ (static files) | ✅ Yes | Multiple controllers all serve identical static files; nginx does the work. |
+| `management` | ❌ (writes datastore) | ⚠️ **Pending** — needs cluster coordinator | Today the role writes a single-node `management.json`. Multiple management replicas writing to the same Postgres without a distributed lock (Redis / NATS / pg-advisory) corrupts state. |
+
+For **most deployments** (small to medium), the right shape is:
+
+- 1 controller running `management` + `signal` + `dashboard` + nginx
+- 2-3 relay hosts in different regions
+- Postgres on RDS / Cloud SQL (managed; do not run on the same VM)
+
+This is what `inventories/production/` is templated for. Single
+`management` replica is the SPOF — for most teams that's fine
+(brief outages during upgrades via the rolling-update playbook are
+the only downtime).
+
+For **large deployments** or 24×7 SLAs the management tier needs
+2+ replicas + a cluster coordinator. That work is tracked under
+the HA story below.
+
 ## What's NOT here yet
 
-- HA story: multi-replica with Postgres + cluster coordinator. The
-  `production` inventory has the host groups (`management`, `signal`,
-  `relay`, `dashboard`) but the role currently writes a single-node
-  config. Postgres + Redis bootstrap is a follow-up.
-- Backup / restore for the management datastore.
+- **HA management** with cluster coordinator. The `production`
+  inventory has the `management` group but the role's
+  `management.json.j2` template doesn't emit a `Cluster:` block
+  yet — adding it (Redis-backed, mirrors the helm chart) is ~6-8h
+  of work + integration testing.
+- **Postgres bootstrap** — assumed managed (RDS / Cloud SQL) or
+  manually installed. No `openzro_postgres` role yet.
+- **Backup / restore** for the management datastore.
 
 See [openzro/openzro/docs/adr/0008](https://github.com/openzro/openzro/blob/main/docs/adr/0008-k8s-deployment.md)
 for the K8s/helm-chart parallel — the Ansible flow targets the same
