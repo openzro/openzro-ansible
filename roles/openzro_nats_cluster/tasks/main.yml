@@ -1,0 +1,100 @@
+---
+# Installs nats-server on every management host and clusters them
+# together on tcp/{{ openzro_nats_cluster_port }}.
+
+- name: Add nats-io apt repo (Debian/Ubuntu)
+  block:
+    - name: Add nats-io GPG key
+      ansible.builtin.get_url:
+        url: https://download.synadia.com/debian/synadia.asc
+        dest: /etc/apt/keyrings/synadia.asc
+        mode: "0644"
+
+    - name: Add nats-io apt repo
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/synadia.asc] https://download.synadia.com/debian stable main"
+        filename: synadia
+        state: present
+        update_cache: true
+  when: ansible_pkg_mgr == "apt"
+
+- name: Install nats-server (apt)
+  ansible.builtin.apt:
+    name: "{{ openzro_nats_package }}"
+    state: present
+  when: ansible_pkg_mgr == "apt"
+  notify: restart nats-server
+
+- name: Install nats-server from upstream binary release (rpm distros)
+  block:
+    - name: Detect arch
+      ansible.builtin.set_fact:
+        nats_arch: "{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}"
+
+    - name: Download nats-server release
+      ansible.builtin.get_url:
+        url: "https://github.com/nats-io/nats-server/releases/download/v2.10.20/nats-server-v2.10.20-linux-{{ nats_arch }}.tar.gz"
+        dest: /tmp/nats-server.tar.gz
+        mode: "0644"
+
+    - name: Extract nats-server
+      ansible.builtin.unarchive:
+        src: /tmp/nats-server.tar.gz
+        dest: /usr/local/bin/
+        remote_src: true
+        creates: /usr/local/bin/nats-server
+        extra_opts: ["--strip-components=1", "--wildcards", "*/nats-server"]
+  when: ansible_pkg_mgr in ["dnf", "yum"]
+  notify: restart nats-server
+
+- name: Ensure nats user exists
+  ansible.builtin.user:
+    name: "{{ openzro_nats_user }}"
+    group: "{{ openzro_nats_group }}"
+    system: true
+    home: "{{ openzro_nats_data_dir }}"
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Ensure nats group exists
+  ansible.builtin.group:
+    name: "{{ openzro_nats_group }}"
+    system: true
+
+- name: NATS data + config dirs
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ openzro_nats_user }}"
+    group: "{{ openzro_nats_group }}"
+    mode: "0750"
+  loop:
+    - "{{ openzro_nats_data_dir }}"
+    - "{{ openzro_nats_config_dir }}"
+
+- name: Render nats-server config
+  ansible.builtin.template:
+    src: nats-server.conf.j2
+    dest: "{{ openzro_nats_config_path }}"
+    owner: "{{ openzro_nats_user }}"
+    group: "{{ openzro_nats_group }}"
+    mode: "0640"
+  notify: restart nats-server
+
+- name: Render nats-server systemd unit
+  ansible.builtin.template:
+    src: nats-server.service.j2
+    dest: /etc/systemd/system/nats-server.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart nats-server
+
+- name: Enable + start nats-server
+  ansible.builtin.systemd:
+    name: "{{ openzro_nats_service }}"
+    enabled: true
+    state: started
+    daemon_reload: true

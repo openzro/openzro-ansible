@@ -1,0 +1,28 @@
+# {{ ansible_managed }}
+# redis-server config for the openZro management cluster
+# coordinator. Master/replica topology — replicas mirror the
+# master's keyspace and serve reads if the openzro coordinator
+# falls back to them.
+
+bind {{ openzro_redis_bind }}
+port {{ openzro_redis_port }}
+protected-mode yes
+
+# AUTH — required when not on loopback only.
+requirepass {{ openzro_redis_password }}
+masterauth {{ openzro_redis_password }}
+
+dir {{ openzro_redis_data_dir }}
+appendonly yes
+appendfsync everysec
+
+{% if not openzro_redis_is_master %}
+# Replica config — point at the master and follow its writes.
+# On master promotion, set openzro_redis_master_host in the
+# inventory to the new master and re-run the playbook.
+replicaof {{ openzro_redis_master_host }} {{ openzro_redis_port }}
+replica-read-only yes
+{% endif %}
+
+logfile ""
+loglevel notice

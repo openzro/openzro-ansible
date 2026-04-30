@@ -1,0 +1,34 @@
+---
+# Standalone NATS server installed on every host in the
+# `management` group. An alternative to the embedded NATS that
+# ships inside openzro-mgmt — operators reach for this when they
+# want NATS as an independently-monitored daemon (per-process
+# resource isolation, separate logs, separate restart cycle).
+#
+# Cluster shape: every management host runs nats-server, all
+# pointed at each other via the `routes:` config block. JetStream
+# enabled with file storage so the management coordinator can use
+# stream-backed primitives.
+
+openzro_nats_package: nats-server
+openzro_nats_service: nats-server
+openzro_nats_user: nats
+openzro_nats_group: nats
+openzro_nats_data_dir: /var/lib/nats
+openzro_nats_config_dir: /etc/nats
+openzro_nats_config_path: "{{ openzro_nats_config_dir }}/nats-server.conf"
+
+openzro_nats_client_port: 4222
+openzro_nats_cluster_port: 6222
+openzro_nats_monitor_port: 8222
+openzro_nats_cluster_name: openzro
+
+# Auto-derived from the `management` group; ansible_host is each
+# host's address as the rest of the inventory sees it.
+openzro_nats_routes: >-
+  {{ groups['management'] | default([])
+     | difference([inventory_hostname])
+     | map('extract', hostvars, ['ansible_host'])
+     | map('regex_replace', '^', 'nats-route://')
+     | map('regex_replace', '$', ':' ~ openzro_nats_cluster_port)
+     | list }}

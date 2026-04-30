@@ -1,0 +1,29 @@
+---
+- name: Validate redis password is set
+  ansible.builtin.assert:
+    that:
+      - openzro_redis_password | length > 0
+    fail_msg: >-
+      openzro_redis_password is required when binding redis to
+      0.0.0.0. Vault-encrypt this in your inventory's group_vars.
+
+- name: Install redis-server
+  ansible.builtin.package:
+    name: "{{ openzro_redis_package }}"
+    state: present
+  notify: restart redis
+
+- name: Render redis.conf
+  ansible.builtin.template:
+    src: redis.conf.j2
+    dest: "{{ openzro_redis_config_path }}"
+    owner: "{{ openzro_redis_user }}"
+    group: "{{ openzro_redis_group }}"
+    mode: "0640"
+  notify: restart redis
+
+- name: Enable + start redis
+  ansible.builtin.systemd:
+    name: "{{ openzro_redis_service }}"
+    enabled: true
+    state: started

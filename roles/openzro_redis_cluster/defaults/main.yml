@@ -1,0 +1,31 @@
+---
+# Redis (master/replica) installed across management hosts. Used
+# as an alternative to embedded NATS / standalone NATS — operators
+# already running Redis-based observability often prefer this for
+# ops consistency.
+#
+# Topology: first management host is master, rest are replicas.
+# Sentinel-based automatic failover is NOT wired here — for that,
+# use a managed Redis (Elasticache / Memorystore) and skip this
+# role. This role is "good enough for two-replica HA with manual
+# promotion" — appropriate for stage / small prod.
+
+openzro_redis_package: redis-server
+openzro_redis_service: redis-server
+openzro_redis_user: redis
+openzro_redis_group: redis
+openzro_redis_data_dir: /var/lib/redis
+openzro_redis_config_path: /etc/redis/redis.conf
+
+openzro_redis_port: 6379
+openzro_redis_bind: 0.0.0.0   # listen on all interfaces; firewall gates access
+
+# Master is whichever management host the inventory lists FIRST
+# in the `management` group — pick deterministically, document
+# in inventory comments. No magic auto-failover.
+openzro_redis_master_host: "{{ groups['management'][0] }}"
+openzro_redis_is_master: "{{ inventory_hostname == openzro_redis_master_host }}"
+
+# Auth — required when binding to non-loopback. Operator vault-
+# encrypts in inventories/*/group_vars/all.yml.
+openzro_redis_password: ""

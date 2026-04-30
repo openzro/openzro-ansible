@@ -1,0 +1,5 @@
+---
+- name: restart redis
+  ansible.builtin.systemd:
+    name: "{{ openzro_redis_service }}"
+    state: restarted

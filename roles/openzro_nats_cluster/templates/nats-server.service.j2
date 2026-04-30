@@ -1,0 +1,29 @@
+# {{ ansible_managed }}
+[Unit]
+Description=NATS server (openZro management cluster coordinator)
+Documentation=https://docs.nats.io/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ openzro_nats_user }}
+Group={{ openzro_nats_group }}
+ExecStart=/usr/bin/nats-server -c {{ openzro_nats_config_path }}
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGINT
+Restart=on-failure
+RestartSec=5s
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths={{ openzro_nats_data_dir }}
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nats-server
+
+[Install]
+WantedBy=multi-user.target

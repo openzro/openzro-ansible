@@ -16,6 +16,26 @@
   roles:
     - common
 
+# Optional cluster-coordinator install on the management hosts.
+# When openzro_cluster_backend is "embedded" (default for HA),
+# nothing runs — the coordinator lives inside openzro-mgmt.
+# Set openzro_cluster_backend to "nats" or "redis" if you want
+# the broker as a separate daemon (per-process resource isolation,
+# independent monitoring).
+- name: Cluster coordinator (NATS) — optional
+  hosts: management
+  become: true
+  roles:
+    - role: openzro_nats_cluster
+      when: openzro_cluster_backend | default('none') == 'nats'
+
+- name: Cluster coordinator (Redis) — optional
+  hosts: management
+  become: true
+  roles:
+    - role: openzro_redis_cluster
+      when: openzro_cluster_backend | default('none') == 'redis'
+
 - name: Signal
   hosts: signal
   become: true

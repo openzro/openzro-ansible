@@ -1,0 +1,41 @@
+# {{ ansible_managed }}
+# nats-server config for the openZro management cluster.
+
+server_name: "{{ inventory_hostname }}"
+
+# Client listen — openzro-mgmt connects here as
+# OPENZRO_NATS_URL=nats://127.0.0.1:{{ openzro_nats_client_port }}
+listen: 127.0.0.1:{{ openzro_nats_client_port }}
+
+# Cluster listen — peer NATS servers gossip here. Bound to all
+# interfaces; firewall must allow tcp/{{ openzro_nats_cluster_port }}
+# between management hosts.
+cluster {
+    name: "{{ openzro_nats_cluster_name }}"
+    listen: 0.0.0.0:{{ openzro_nats_cluster_port }}
+{% if openzro_nats_routes | length > 0 %}
+    routes: [
+{% for route in openzro_nats_routes %}
+        "{{ route }}"{% if not loop.last %},{% endif %}
+
+{% endfor %}
+    ]
+{% endif %}
+}
+
+# JetStream — required by openzro's coordinator for stream-backed
+# state propagation. File store survives restarts.
+jetstream {
+    store_dir: "{{ openzro_nats_data_dir }}/jetstream"
+    max_memory_store: 256MB
+    max_file_store: 4GB
+}
+
+# HTTP monitoring on loopback only — `curl localhost:8222/varz`
+# for ops debugging. Don't expose; ops over a private network.
+http: 127.0.0.1:{{ openzro_nats_monitor_port }}
+
+# Logging — journal-friendly. systemd captures this.
+debug: false
+trace: false
+logtime: false
