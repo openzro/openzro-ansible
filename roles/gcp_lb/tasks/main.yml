@@ -1,0 +1,189 @@
+---
+# Provisions the GCP load balancers in front of openZro:
+#   - External HTTPS LB for the control plane (mgmt + signal + dashboard)
+#   - External TCP/UDP Network LB for the relay tier
+#
+# Runs from localhost via `connection: local` (see playbooks/site.yml)
+# — calls GCP APIs directly via the google.cloud collection. No
+# ssh into the LB itself.
+#
+# Requires: pip install google-auth requests + ansible-galaxy
+# collection install google.cloud — both pulled by requirements.yml.
+
+- name: Validate required GCP vars
+  ansible.builtin.assert:
+    that:
+      - gcp_project | length > 0
+      - openzro_public_domain | length > 0
+    fail_msg: >-
+      gcp_lb requires gcp_project and openzro_public_domain.
+
+- name: Common GCP auth fact
+  ansible.builtin.set_fact:
+    _gcp_common: &gcp_common
+      project: "{{ gcp_project }}"
+      auth_kind: "{{ gcp_auth_kind }}"
+      service_account_file: "{{ gcp_service_account_file or omit }}"
+
+# ---------------------------------------------------------------------
+# 1. Google-managed cert for openzro_public_domain (Let's Encrypt
+#    behind the scenes, GCP handles renewal). Skipped if the
+#    operator pre-created one and just passes the name.
+# ---------------------------------------------------------------------
+- name: Google-managed SSL cert
+  google.cloud.gcp_compute_ssl_certificate:
+    name: "{{ gcp_managed_cert_name }}"
+    type: MANAGED
+    managed:
+      domains: ["{{ openzro_public_domain }}"]
+    state: present
+    <<: *gcp_common
+
+# ---------------------------------------------------------------------
+# 2. Instance group for the controller backend.
+# ---------------------------------------------------------------------
+- name: Look up controller instances
+  google.cloud.gcp_compute_instance_info:
+    zone: "{{ gcp_zone }}"
+    filters:
+      - "name = ({{ gcp_controller_instance_names | join(' OR name = ') }})"
+    <<: *gcp_common
+  register: gcp_controllers
+  when: gcp_controller_instance_names | length > 0
+
+- name: Controller instance group
+  google.cloud.gcp_compute_instance_group:
+    name: "{{ gcp_lb_name_prefix }}-controllers-ig"
+    zone: "{{ gcp_zone }}"
+    instances: "{{ gcp_controllers.resources | map(attribute='selfLink') | list }}"
+    named_ports:
+      - { name: https, port: 443 }
+    state: present
+    <<: *gcp_common
+
+# ---------------------------------------------------------------------
+# 3. Health check + backend service + URL map + target HTTPS proxy
+#    + global forwarding rule. Standard HTTPS LB seven-step dance.
+# ---------------------------------------------------------------------
+- name: Controller HTTPS health check
+  google.cloud.gcp_compute_health_check:
+    name: "{{ gcp_lb_name_prefix }}-controllers-hc"
+    type: HTTPS
+    https_health_check:
+      port: 443
+      request_path: /
+    state: present
+    <<: *gcp_common
+  register: gcp_hc
+
+- name: Controller backend service
+  google.cloud.gcp_compute_backend_service:
+    name: "{{ gcp_lb_name_prefix }}-controllers-bs"
+    protocol: HTTPS
+    port_name: https
+    health_checks:
+      - "{{ gcp_hc.selfLink }}"
+    backends:
+      - group: "projects/{{ gcp_project }}/zones/{{ gcp_zone }}/instanceGroups/{{ gcp_lb_name_prefix }}-controllers-ig"
+    load_balancing_scheme: EXTERNAL
+    state: present
+    <<: *gcp_common
+  register: gcp_bs
+
+- name: URL map (default to controller backend)
+  google.cloud.gcp_compute_url_map:
+    name: "{{ gcp_lb_name_prefix }}-url-map"
+    default_service: "{{ gcp_bs.selfLink }}"
+    state: present
+    <<: *gcp_common
+  register: gcp_url_map
+
+- name: Target HTTPS proxy
+  google.cloud.gcp_compute_target_https_proxy:
+    name: "{{ gcp_lb_name_prefix }}-https-proxy"
+    url_map: "{{ gcp_url_map.selfLink }}"
+    ssl_certificates:
+      - "projects/{{ gcp_project }}/global/sslCertificates/{{ gcp_managed_cert_name }}"
+    state: present
+    <<: *gcp_common
+  register: gcp_https_proxy
+
+- name: Global forwarding rule (443)
+  google.cloud.gcp_compute_global_forwarding_rule:
+    name: "{{ gcp_lb_name_prefix }}-https-fwd"
+    target: "{{ gcp_https_proxy.selfLink }}"
+    port_range: "443-443"
+    ip_protocol: TCP
+    load_balancing_scheme: EXTERNAL
+    state: present
+    <<: *gcp_common
+  register: gcp_fwd_rule
+
+# ---------------------------------------------------------------------
+# 4. Relay tier — TCP/UDP Network LB. Direct, not proxied.
+# ---------------------------------------------------------------------
+- name: Look up relay instances
+  google.cloud.gcp_compute_instance_info:
+    zone: "{{ gcp_zone }}"
+    filters:
+      - "name = ({{ gcp_relay_instance_names | join(' OR name = ') }})"
+    <<: *gcp_common
+  register: gcp_relays
+  when: gcp_relay_instance_names | length > 0
+
+- name: Relay target pool (network LB needs a pool, not an IG)
+  google.cloud.gcp_compute_target_pool:
+    name: "{{ gcp_lb_name_prefix }}-relays-pool"
+    region: "{{ gcp_region }}"
+    instances: "{{ gcp_relays.resources | map(attribute='selfLink') | list }}"
+    state: present
+    <<: *gcp_common
+  register: gcp_relay_pool
+
+- name: Relay forwarding rule UDP/33080
+  google.cloud.gcp_compute_forwarding_rule:
+    name: "{{ gcp_lb_name_prefix }}-relays-udp"
+    region: "{{ gcp_region }}"
+    target: "{{ gcp_relay_pool.selfLink }}"
+    ip_protocol: UDP
+    port_range: "33080-33080"
+    load_balancing_scheme: EXTERNAL
+    state: present
+    <<: *gcp_common
+
+- name: Relay forwarding rule TCP/33080
+  google.cloud.gcp_compute_forwarding_rule:
+    name: "{{ gcp_lb_name_prefix }}-relays-tcp"
+    region: "{{ gcp_region }}"
+    target: "{{ gcp_relay_pool.selfLink }}"
+    ip_protocol: TCP
+    port_range: "33080-33080"
+    load_balancing_scheme: EXTERNAL
+    state: present
+    <<: *gcp_common
+  register: gcp_relay_tcp_fwd
+
+# ---------------------------------------------------------------------
+# 5. Cloud DNS records.
+# ---------------------------------------------------------------------
+- name: A-record for the public domain → HTTPS LB
+  google.cloud.gcp_dns_resource_record_set:
+    managed_zone: "{{ gcp_dns_managed_zone }}"
+    name: "{{ openzro_public_domain }}."
+    type: A
+    ttl: 300
+    target: ["{{ gcp_fwd_rule.IPAddress }}"]
+    state: present
+    <<: *gcp_common
+  when: gcp_manage_dns and gcp_dns_managed_zone | length > 0
+
+- name: A-record for relay subdomain → Network LB
+  google.cloud.gcp_dns_resource_record_set:
+    managed_zone: "{{ gcp_dns_managed_zone }}"
+    name: "relay.{{ openzro_public_domain }}."
+    type: A
+    ttl: 300
+    target: ["{{ gcp_relay_tcp_fwd.IPAddress }}"]
+    state: present
+    <<: *gcp_common
+  when: gcp_manage_dns and gcp_dns_managed_zone | length > 0

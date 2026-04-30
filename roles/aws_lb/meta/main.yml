@@ -1,0 +1,21 @@
+---
+# Required Ansible collections — install via:
+#   ansible-galaxy install -r requirements.yml
+collections:
+  - name: community.aws
+    version: ">=7.0.0"
+  - name: amazon.aws
+    version: ">=7.0.0"
+
+galaxy_info:
+  author: openZro
+  description: >-
+    Provision an Application Load Balancer (control plane) and
+    Network Load Balancer (relay) in front of an openZro deployment
+    on AWS. Runs from localhost via the AWS API — does not ssh into
+    the LB.
+  license: BSD-3-Clause
+  min_ansible_version: "2.15"
+  platforms:
+    - name: GenericLinux
+      versions: [all]

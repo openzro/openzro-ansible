@@ -1,0 +1,36 @@
+---
+# GCP LB topology assumed:
+#
+#   External HTTPS LB (port 443) ─→ openzro-controllers backend
+#       (instances running mgmt + signal + dashboard + nginx)
+#
+#   External TCP/UDP NetworkLB (port 33080) ─→ openzro-relays backend
+#       (instances running just openzro-relay; relay is L4)
+
+gcp_project: ""             # required
+gcp_region: us-central1
+gcp_auth_kind: serviceaccount  # serviceaccount | application | machineaccount
+
+# Path on the CONTROL host to a GCP service-account JSON key with
+# permissions to manage compute + DNS resources. Vault-encrypt or
+# leave blank to use Application Default Credentials (gcloud
+# auth application-default login on the control host).
+gcp_service_account_file: ""
+
+# Existing instances to register as backends. Provide the bare
+# instance names — the role looks them up in gcp_zone.
+gcp_zone: us-central1-a
+gcp_controller_instance_names: []
+gcp_relay_instance_names: []
+
+# DNS — managed via Cloud DNS. Set gcp_manage_dns: false to skip.
+gcp_manage_dns: true
+gcp_dns_managed_zone: ""    # the zone NAME (not domain) in Cloud DNS
+
+# TLS — either a managed cert ARN to point at (preferred), or
+# leave blank to let the role create a Google-managed cert tied
+# to openzro_public_domain.
+gcp_managed_cert_name: "openzro-cert"
+
+# Naming.
+gcp_lb_name_prefix: openzro

@@ -1,0 +1,56 @@
+---
+# AWS LB topology assumed:
+#
+#   ALB (HTTPS, port 443) ─→ openzro-controllers TargetGroup
+#       (instances running mgmt + signal + dashboard + nginx)
+#
+#   NLB (UDP/TCP, port 33080) ─→ openzro-relays TargetGroup
+#       (instances running just openzro-relay; relay is L4, can't
+#       go through an ALB which is L7)
+#
+# Both LBs sit in the same VPC; the ALB lives in public subnets
+# (terminates TLS for the dashboard / mgmt / signal traffic) and
+# the NLB lives in public subnets too (relay needs internet
+# reachability for peers behind NAT).
+
+aws_region: us-east-1
+aws_vpc_id: ""           # required — discover with `aws ec2 describe-vpcs`
+
+# Subnets the ALB lives in (must be public, multi-AZ for HA).
+aws_alb_subnets: []
+
+# Subnets the NLB lives in (also public, multi-AZ).
+aws_nlb_subnets: []
+
+# Security group the controller instances belong to. The role
+# adds a rule allowing ALB SG → controller SG on tcp/443.
+aws_controller_sg_id: ""
+
+# Security group the relay instances belong to. The role adds
+# rules allowing NLB SG → relay SG on udp/33080 + tcp/33080.
+aws_relay_sg_id: ""
+
+# Instances to register as targets. Operator passes EC2 instance
+# IDs (i-0123…) — usually pulled from a tag-based query in the
+# inventory's hosts.yml.
+aws_controller_instance_ids: []  # for ALB target group
+aws_relay_instance_ids: []       # for NLB target group
+
+# TLS — either an ACM ARN you already have, or leave blank to let
+# the role request a new ACM cert (DNS-01 validation, requires
+# a Route53 hosted zone for openzro_public_domain).
+aws_acm_cert_arn: ""
+
+# Route53 — the role creates an A-record alias for
+# openzro_public_domain pointing at the ALB. Set
+# aws_route53_zone_id (find with `aws route53 list-hosted-zones`)
+# or skip with aws_manage_dns: false.
+aws_manage_dns: true
+aws_route53_zone_id: ""
+
+# Naming.
+aws_alb_name: "openzro-controllers"
+aws_nlb_name: "openzro-relays"
+aws_alb_tg_name: "openzro-controllers-tg"
+aws_nlb_tg_udp_name: "openzro-relays-udp-tg"
+aws_nlb_tg_tcp_name: "openzro-relays-tcp-tg"
