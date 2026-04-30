@@ -1,55 +1,56 @@
 ---
-# Stand-in dashboard role: pulls the upstream container and runs it
-# under docker compose. Replace this with apt/dnf install once the
-# native openzro-dashboard package ships.
+# Bare-metal dashboard install:
+#   1. apt/dnf install openzro-dashboard (static bundle + render-env.sh)
+#   2. Render /etc/openzro-dashboard.env from the role's template
+#   3. Run render-env.sh to substitute env values into the bundle
+# nginx is handled by openzro_nginx (separate role); it serves
+# the static files from openzro_dashboard_root.
 
-- name: Ensure docker engine is installed
-  ansible.builtin.package:
-    name: docker.io
+- name: Install openzro-dashboard package (apt)
+  ansible.builtin.apt:
+    name: "{{ openzro_dashboard_package }}{{ ('=' + openzro_version) if openzro_version is defined else '' }}"
     state: present
+    update_cache: true
   when: ansible_pkg_mgr == "apt"
+  register: dashboard_pkg_apt
 
-- name: Ensure docker engine is installed (dnf/yum)
-  ansible.builtin.package:
-    name: docker
+- name: Install openzro-dashboard package (dnf/yum)
+  ansible.builtin.dnf:
+    name: "{{ openzro_dashboard_package }}{{ ('-' + openzro_version) if openzro_version is defined else '' }}"
     state: present
   when: ansible_pkg_mgr in ["dnf", "yum"]
+  register: dashboard_pkg_dnf
 
-- name: Ensure docker daemon is running
-  ansible.builtin.systemd:
-    name: docker
-    enabled: true
-    state: started
-
-- name: Compose dir
-  ansible.builtin.file:
-    path: "{{ openzro_dashboard_compose_dir }}"
-    state: directory
-    owner: root
-    group: root
-    mode: "0750"
-
-- name: Render docker-compose.yml
-  ansible.builtin.template:
-    src: docker-compose.yml.j2
-    dest: "{{ openzro_dashboard_compose_dir }}/docker-compose.yml"
-    owner: root
-    group: root
-    mode: "0640"
-  register: dashboard_compose
+- name: Install openzro-dashboard package (pacman)
+  community.general.pacman:
+    name: "{{ openzro_dashboard_package }}"
+    state: present
+    update_cache: true
+  when: ansible_pkg_mgr == "pacman"
+  register: dashboard_pkg_pacman
 
 - name: Render dashboard env file
   ansible.builtin.template:
-    src: dashboard.env.j2
-    dest: "{{ openzro_dashboard_compose_dir }}/.env"
+    src: openzro-dashboard.env.j2
+    dest: "{{ openzro_dashboard_env_file }}"
     owner: root
     group: root
     mode: "0640"
-  register: dashboard_env
+    backup: true
+  register: dashboard_env_render
 
-- name: Up the dashboard stack
-  community.docker.docker_compose_v2:
-    project_src: "{{ openzro_dashboard_compose_dir }}"
-    state: present
-    pull: always
-  when: dashboard_compose.changed or dashboard_env.changed
+# Re-render the static bundle's $$VAR placeholders whenever the
+# package was upgraded OR the env values changed. The script is
+# idempotent (uses .orig snapshots).
+- name: Render env values into the static bundle
+  ansible.builtin.command:
+    cmd: "{{ openzro_dashboard_root }}/render-env.sh"
+  environment:
+    DASHBOARD_ROOT: "{{ openzro_dashboard_root }}"
+    ENV_FILE: "{{ openzro_dashboard_env_file }}"
+  when: >
+    dashboard_pkg_apt.changed or
+    dashboard_pkg_dnf.changed or
+    dashboard_pkg_pacman.changed or
+    dashboard_env_render.changed
+  changed_when: true

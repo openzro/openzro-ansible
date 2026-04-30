@@ -1,13 +1,31 @@
 ---
-# The dashboard role currently runs the upstream container image
-# under docker compose. When openzro/openzro ships a native
-# `openzro-dashboard` deb/rpm (nginx + static export), swap this
-# role's tasks/main.yml for the same apt/dnf install pattern as
-# management/signal/relay.
+# Bare-metal dashboard install. The deb/rpm package drops the
+# static bundle at /usr/share/openzro-dashboard/ — the role then
+# renders /etc/openzro-dashboard.env from a Jinja template and
+# runs render-env.sh to substitute the env values into the
+# static files. nginx in front comes from the openzro_nginx role.
 
-openzro_dashboard_image: "ghcr.io/openzro/dashboard"
-openzro_dashboard_image_tag: "{{ openzro_version | default('latest') }}"
-openzro_dashboard_listen_port: 8080
+openzro_dashboard_package: openzro-dashboard
+openzro_dashboard_root: /usr/share/openzro-dashboard
+openzro_dashboard_env_file: /etc/openzro-dashboard.env
 
-openzro_dashboard_compose_dir: /etc/openzro/dashboard
-openzro_dashboard_data_dir:    /var/lib/openzro/dashboard
+# OIDC values default-driven from group_vars/all.yml — same vars
+# the openzro_management role uses, so a single inventory definition
+# covers both.
+openzro_dashboard_auth_authority: "{{ openzro_oidc_issuer }}"
+openzro_dashboard_auth_client_id: "{{ openzro_oidc_client_id }}"
+openzro_dashboard_auth_audience: "{{ openzro_oidc_client_id }}"
+openzro_dashboard_auth_supported_scopes: "{{ openzro_oidc_supported_scopes }}"
+openzro_dashboard_use_auth0: false
+
+# Optional — leave empty unless your IdP requires it.
+openzro_dashboard_auth_client_secret: ""
+openzro_dashboard_auth_redirect_uri: ""
+openzro_dashboard_auth_silent_redirect_uri: ""
+
+# Management API endpoint as the BROWSER sees it (public URL).
+openzro_dashboard_mgmt_api_endpoint: "https://{{ openzro_public_domain }}"
+openzro_dashboard_mgmt_grpc_api_endpoint: ""
+
+openzro_dashboard_token_source: accessToken
+openzro_dashboard_drag_query_params: false

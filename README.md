@@ -84,10 +84,95 @@ install with the same template-driven approach as the other three.
   `production` inventory has the host groups (`management`, `signal`,
   `relay`, `dashboard`) but the role currently writes a single-node
   config. Postgres + Redis bootstrap is a follow-up.
-- Cert-manager-style cert lifecycle — for now bring your own cert
-  via `openzro_tls_cert_path` / `openzro_tls_key_path`.
 - Backup / restore for the management datastore.
 
 See [openzro/openzro/docs/adr/0008](https://github.com/openzro/openzro/blob/main/docs/adr/0008-k8s-deployment.md)
 for the K8s/helm-chart parallel — the Ansible flow targets the same
 production-shape but on bare metal.
+
+## Recommended infrastructure sizing
+
+The numbers below are starting points based on observed footprints
+of the daemons under typical traffic. Tune up if your tracing /
+metrics show pressure. **All daemons run as native systemd units
+with no container layer** — overhead is the binary itself, not a
+runtime + image.
+
+### Lab / proof-of-concept (< 100 peers)
+
+A single all-in-one VM is plenty:
+
+| Resource | Size |
+|---|---|
+| CPU | 2 vCPU |
+| RAM | 4 GB |
+| Disk | 40 GB SSD |
+| Network | 1 Gbps |
+
+Components colocated on that one host:
+`management` + `signal` + `relay` + `dashboard` + `nginx` +
+`SQLite` (no Postgres needed yet).
+
+Use the `inventories/lab/` template. Self-signed cert is fine.
+
+### Small production (100 – 1 000 peers)
+
+Split control plane from data plane:
+
+| Role | Count | CPU | RAM | Disk | Notes |
+|---|---|---|---|---|---|
+| Controller | 1 | 2 vCPU | 4 GB | 60 GB SSD | mgmt + signal + dashboard + nginx |
+| Gateway (relay) | 2 | 1 vCPU | 2 GB | 20 GB | distributed across 2 regions / AZs for failover |
+| Postgres | 1 | 2 vCPU | 4 GB | 50 GB SSD | managed (RDS / Cloud SQL) preferred over self-hosted |
+
+The mgmt + signal + dashboard share one host because they're
+control-plane (low traffic, mostly idempotent state). Relays are
+data-plane (bandwidth-bound) and benefit from being independent
+hosts on different networks — peers behind symmetric NAT fall
+back to whichever relay they reach first.
+
+Cert via certbot HTTP-01 (default `openzro_tls_mode`).
+
+### Medium production (1 000 – 10 000 peers)
+
+| Role | Count | CPU | RAM | Disk | Notes |
+|---|---|---|---|---|---|
+| Controller (HA pair) | 2 | 4 vCPU | 8 GB | 100 GB SSD | behind cloud LB; mgmt + signal share, dashboard on either |
+| Gateway (relay) | 3 | 2 vCPU | 4 GB | 40 GB | one per region; multi-AZ within region |
+| Postgres (HA) | 1 cluster | 4 vCPU | 8 GB | 100 GB SSD | RDS Multi-AZ or Patroni; daily snapshots |
+
+The HA controller pair runs management + signal in active-active
+mode behind a cloud LB — see the BACKLOG entry on HA. Dashboard
+runs on either controller (stateless).
+
+Use the `inventories/production/` template with `openzro_cloud:
+aws` or `openzro_cloud: gcp` to wire up the LB role.
+
+### Large production (10 000+ peers)
+
+Custom — if you've grown past medium, the bottleneck is usually
+Postgres + the bandwidth on the relay tier, not the management
+service. Profile first, then scale the relay fleet horizontally
+(adding more gateway hosts in the same region balances better
+than scaling up).
+
+### Per-component notes
+
+| Component | What it does | Resource bound |
+|---|---|---|
+| `management` | gRPC + REST control API, peer/route/policy state, JWT validation against the IdP | CPU on JWT validation hot path; RAM scales with peer count |
+| `signal` | Stateless rendezvous for WireGuard handshake messages | CPU on TLS termination on burst (peer reconnects); RAM minimal |
+| `relay` | Forwards WireGuard between peers behind NAT (TURN-like) | Bandwidth-bound; RAM minimal |
+| `dashboard` | Static SPA served by nginx | Trivial — 256 MB RAM serves thousands of admin sessions |
+
+### Networking recommendations
+
+- **Controller**: ports 80 + 443 public (nginx terminates TLS),
+  443 forwards to mgmt gRPC + REST + signal gRPC + dashboard.
+- **Relay**: UDP 33080 + TCP 33080 public. Direct, NOT through
+  nginx — relay is L4.
+- **Postgres**: never public. Private network only between
+  controller and DB.
+- **Cloud LB**: terminate TLS at LB OR pass-through to nginx;
+  most operators terminate at LB for ACM/managed cert reasons.
+  When passing through, nginx still does the TLS handshake.

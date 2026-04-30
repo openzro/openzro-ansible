@@ -1,8 +1,0 @@
-services:
-  dashboard:
-    image: "{{ openzro_dashboard_image }}:{{ openzro_dashboard_image_tag }}"
-    restart: unless-stopped
-    ports:
-      - "{{ openzro_dashboard_listen_port }}:80"
-    env_file:
-      - .env
