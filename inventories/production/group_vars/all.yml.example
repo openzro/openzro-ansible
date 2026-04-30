@@ -1,0 +1,32 @@
+---
+# Production group_vars template. Copy to `all.yml`, fill in, encrypt
+# the secrets with ansible-vault, and never commit `all.yml`.
+
+openzro_public_domain: "openzro.example.com"
+openzro_relay_public_address: "relay.{{ openzro_public_domain }}"
+openzro_relay_port: 33080
+
+openzro_oidc_issuer: "https://auth.example.com/realms/openzro"
+openzro_oidc_client_id: "openzro-dashboard"
+openzro_oidc_client_secret: !vault |
+  $ANSIBLE_VAULT;1.1;AES256
+  REPLACE_WITH_VAULTED_SECRET
+openzro_oidc_supported_scopes: "openid profile email groups"
+
+# Postgres is mandatory for HA — sqlite is single-process only.
+openzro_datastore_engine: postgres
+openzro_postgres_dsn: !vault |
+  $ANSIBLE_VAULT;1.1;AES256
+  REPLACE_WITH_VAULTED_DSN
+
+openzro_relay_auth_secret: !vault |
+  $ANSIBLE_VAULT;1.1;AES256
+  REPLACE_WITH_VAULTED_RANDOM_32B
+
+# Production TLS — mount your real cert chain.
+openzro_self_signed_tls: false
+openzro_tls_cert_path: /etc/letsencrypt/live/openzro.example.com/fullchain.pem
+openzro_tls_key_path:  /etc/letsencrypt/live/openzro.example.com/privkey.pem
+
+openzro_log_level: "info"
+openzro_version: "0.53.1-alpha.9"

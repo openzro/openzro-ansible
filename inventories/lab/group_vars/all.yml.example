@@ -1,0 +1,63 @@
+---
+# Lab group_vars — copy this file to `all.yml` and fill in the values
+# below. `all.yml` is gitignored; `all.yml.example` is committed as a
+# template.
+
+# ---------------------------------------------------------------------
+# Public-facing domain. Clients dial management/signal at this name and
+# trust the TLS cert presented for it. For lab use a wildcard A record
+# pointing at this single host (e.g. openzro.example.com → 192.168.1.10).
+# ---------------------------------------------------------------------
+openzro_public_domain: "openzro.example.com"
+
+# Public hostname for the relay (peers connect here directly, not
+# through the dashboard's reverse proxy). Often the same as the
+# public domain, sometimes a separate `relay.<domain>`.
+openzro_relay_public_address: "{{ openzro_public_domain }}"
+openzro_relay_port: 33080
+
+# ---------------------------------------------------------------------
+# OIDC / Identity provider. Lab default: Dex on the same host (managed
+# separately via docker / a sister role, not this playbook). For real
+# deployments point at Keycloak, Auth0, Authentik, etc.
+# ---------------------------------------------------------------------
+openzro_oidc_issuer: "https://dex.{{ openzro_public_domain }}"
+openzro_oidc_client_id: "openzro-dashboard"
+openzro_oidc_client_secret: "REPLACE_WITH_DEX_OR_KEYCLOAK_SECRET"
+# JSON array, comma-separated values supported by management's
+# config validator. Must include `email` for user identity.
+openzro_oidc_supported_scopes: "openid profile email groups"
+
+# ---------------------------------------------------------------------
+# Datastore. SQLite is fine for a lab; Postgres is required for HA.
+# ---------------------------------------------------------------------
+openzro_datastore_engine: "sqlite"   # sqlite | postgres
+# Postgres DSN — only used when engine == postgres.
+# openzro_postgres_dsn: "host=db.internal port=5432 user=openzro password=REPLACE dbname=openzro sslmode=require"
+
+# ---------------------------------------------------------------------
+# Auth shared secret for the relay (peers present this to register).
+# Generate once with:
+#   openssl rand -base64 32
+# Treat as a credential — vault-encrypt this in real inventories.
+# ---------------------------------------------------------------------
+openzro_relay_auth_secret: "REPLACE_WITH_BASE64_RANDOM_32B"
+
+# ---------------------------------------------------------------------
+# TLS — bring your own cert/key (PEM). The role copies these into
+# /etc/openzro/tls/ and references them from management.json. For a
+# lab, set openzro_self_signed_tls: true to have the role generate
+# a self-signed cert on first run.
+# ---------------------------------------------------------------------
+openzro_self_signed_tls: true
+# openzro_tls_cert_path: /path/on/control-host/fullchain.pem
+# openzro_tls_key_path:  /path/on/control-host/privkey.pem
+
+# ---------------------------------------------------------------------
+# Operational tuning — usually leave at defaults.
+# ---------------------------------------------------------------------
+openzro_log_level: "info"   # trace | debug | info | warn | error
+
+# Pin a specific release (without the "v" prefix). Leave unset to
+# install whatever apt/dnf considers the latest in the openzro repo.
+# openzro_version: "0.53.1-alpha.9"

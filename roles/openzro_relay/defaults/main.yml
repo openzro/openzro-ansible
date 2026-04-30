@@ -1,0 +1,11 @@
+---
+openzro_relay_package: openzro-relay
+openzro_relay_env_file: /etc/default/openzro-relay
+openzro_relay_service: openzro-relay.service
+
+# Internal listen address — what the systemd unit binds to.
+openzro_relay_listen_address: "0.0.0.0:33080"
+
+# Externally-resolvable address peers connect to. Falls back to
+# the public domain if a relay-specific name isn't given.
+openzro_relay_exposed_address: "rel://{{ openzro_relay_public_address | default(openzro_public_domain) }}:{{ openzro_relay_port | default(33080) }}"

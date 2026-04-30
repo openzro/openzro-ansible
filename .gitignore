@@ -1,0 +1,17 @@
+# Local-only inventory copies (templated above by host operators)
+inventories/*/group_vars/all.yml
+inventories/*/host_vars/
+
+# Ansible state
+*.retry
+.ansible/
+
+# Vault password files (never commit these — use --vault-password-file)
+.vault_pass
+*.vault
+
+# Editor / OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store

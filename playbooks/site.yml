@@ -1,0 +1,37 @@
+---
+# Full-stack openzro install. Order matters:
+#  1. common  — repo + key first, so all subsequent installs use it
+#  2. signal  — stateless; comes up fast
+#  3. relay   — needs the auth secret, no other deps
+#  4. management — needs OIDC + datastore reachable, drives the rest
+#  5. dashboard — HTTP frontend; relies on management's REST API
+
+- name: Common (apt/yum repo + GPG key)
+  hosts: all
+  become: true
+  roles:
+    - common
+
+- name: Signal
+  hosts: signal
+  become: true
+  roles:
+    - openzro_signal
+
+- name: Relay
+  hosts: relay
+  become: true
+  roles:
+    - openzro_relay
+
+- name: Management
+  hosts: management
+  become: true
+  roles:
+    - openzro_management
+
+- name: Dashboard
+  hosts: dashboard
+  become: true
+  roles:
+    - openzro_dashboard

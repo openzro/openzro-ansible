@@ -1,0 +1,76 @@
+---
+- name: Install openzro-management package (apt)
+  ansible.builtin.apt:
+    name: "{{ openzro_management_package }}{{ ('=' + openzro_version) if openzro_version is defined else '' }}"
+    state: present
+    update_cache: true
+  when: ansible_pkg_mgr == "apt"
+  notify: restart openzro-management
+
+- name: Install openzro-management package (dnf/yum)
+  ansible.builtin.dnf:
+    name: "{{ openzro_management_package }}{{ ('-' + openzro_version) if openzro_version is defined else '' }}"
+    state: present
+  when: ansible_pkg_mgr in ["dnf", "yum"]
+  notify: restart openzro-management
+
+- name: Ensure openzro data dir exists
+  ansible.builtin.file:
+    path: "{{ openzro_management_data_dir }}"
+    state: directory
+    owner: openzro
+    group: openzro
+    mode: "0750"
+
+- name: Look up existing DataStoreEncryptionKey on host
+  ansible.builtin.slurp:
+    src: "{{ openzro_management_data_dir }}/.encryption-key"
+  register: openzro_existing_key
+  failed_when: false
+  changed_when: false
+
+- name: Generate DataStoreEncryptionKey on first install
+  ansible.builtin.shell: |
+    set -euo pipefail
+    head -c 32 /dev/urandom | base64 > {{ openzro_management_data_dir }}/.encryption-key
+    chown openzro:openzro {{ openzro_management_data_dir }}/.encryption-key
+    chmod 0400              {{ openzro_management_data_dir }}/.encryption-key
+  args:
+    creates: "{{ openzro_management_data_dir }}/.encryption-key"
+  when: openzro_existing_key.content is not defined
+
+- name: Re-read DataStoreEncryptionKey post-generation
+  ansible.builtin.slurp:
+    src: "{{ openzro_management_data_dir }}/.encryption-key"
+  register: openzro_key_blob
+
+- name: Stash decoded key for the template
+  ansible.builtin.set_fact:
+    openzro_management_datastore_key: "{{ openzro_key_blob.content | b64decode | trim }}"
+
+- name: Render management.json from template
+  ansible.builtin.template:
+    src: management.json.j2
+    dest: "{{ openzro_management_config_path }}"
+    owner: openzro
+    group: openzro
+    mode: "0640"
+    backup: true
+  notify: restart openzro-management
+
+- name: Render systemd EnvironmentFile
+  ansible.builtin.template:
+    src: openzro-management.env.j2
+    dest: "{{ openzro_management_env_file }}"
+    owner: root
+    group: openzro
+    mode: "0640"
+    backup: true
+  notify: restart openzro-management
+
+- name: Enable + start openzro-management
+  ansible.builtin.systemd:
+    name: "{{ openzro_management_service }}"
+    enabled: true
+    state: started
+    daemon_reload: true

@@ -1,0 +1,73 @@
+---
+# Add pkg.openzro.io as an apt or yum repo, import the signing key.
+# Idempotent — re-running has no effect after the first apply.
+
+- name: Detect package manager family
+  ansible.builtin.set_fact:
+    openzro_pkg_family: "{{ ansible_pkg_mgr }}"
+
+- name: Ensure /etc/openzro exists
+  ansible.builtin.file:
+    path: /etc/openzro
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: APT — install prerequisites for HTTPS repo
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: openzro_pkg_family == "apt"
+
+- name: APT — fetch openzro signing key (armored)
+  ansible.builtin.get_url:
+    url: https://pkg.openzro.io/openzro-archive-key.asc
+    dest: /etc/apt/keyrings/openzro-archive-key.asc
+    mode: "0644"
+    force: false
+  when: openzro_pkg_family == "apt"
+
+- name: APT — convert armored key to binary keyring
+  ansible.builtin.command:
+    cmd: gpg --dearmor --yes -o /etc/apt/keyrings/openzro-archive-keyring.gpg /etc/apt/keyrings/openzro-archive-key.asc
+    creates: /etc/apt/keyrings/openzro-archive-keyring.gpg
+  when: openzro_pkg_family == "apt"
+
+- name: APT — register pkg.openzro.io repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/openzro-archive-keyring.gpg] https://pkg.openzro.io/apt stable main"
+    filename: openzro
+    state: present
+    update_cache: true
+  when: openzro_pkg_family == "apt"
+
+- name: YUM/DNF — fetch openzro signing key
+  ansible.builtin.get_url:
+    url: https://pkg.openzro.io/openzro-archive-key.asc
+    dest: /etc/pki/rpm-gpg/RPM-GPG-KEY-openzro
+    mode: "0644"
+    force: false
+  when: openzro_pkg_family in ["dnf", "yum"]
+
+- name: YUM/DNF — import signing key into rpm
+  ansible.builtin.rpm_key:
+    state: present
+    key: /etc/pki/rpm-gpg/RPM-GPG-KEY-openzro
+  when: openzro_pkg_family in ["dnf", "yum"]
+
+- name: YUM/DNF — register pkg.openzro.io repository
+  ansible.builtin.yum_repository:
+    name: openzro
+    description: openZro
+    baseurl: "https://pkg.openzro.io/rpm/$basearch"
+    gpgcheck: true
+    gpgkey: file:///etc/pki/rpm-gpg/RPM-GPG-KEY-openzro
+    repo_gpgcheck: true
+    enabled: true
+  when: openzro_pkg_family in ["dnf", "yum"]

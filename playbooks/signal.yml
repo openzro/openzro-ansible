@@ -1,0 +1,12 @@
+---
+- name: Common
+  hosts: signal
+  become: true
+  roles:
+    - common
+
+- name: Signal
+  hosts: signal
+  become: true
+  roles:
+    - openzro_signal

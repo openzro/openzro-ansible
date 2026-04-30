@@ -1,0 +1,42 @@
+{
+    "Stuns": [],
+    "TURNConfig": {
+        "Turns": [],
+        "TimeBasedCredentials": false,
+        "CredentialsTTL": "12h",
+        "Secret": "not-used"
+    },
+    "Relay": {
+        "Addresses": ["rel://{{ openzro_relay_public_address }}:{{ openzro_relay_port }}"],
+        "CredentialsTTL": "24h",
+        "Secret": "{{ openzro_relay_auth_secret }}"
+    },
+    "Signal": {
+        "Proto": "https",
+        "URI": "{{ openzro_public_domain }}:443"
+    },
+    "ReverseProxy": {
+        "TrustedHTTPProxies": [],
+        "TrustedHTTPProxiesCount": 0,
+        "TrustedPeers": ["0.0.0.0/0"]
+    },
+    "DisableDefaultPolicy": false,
+    "DataStoreEncryptionKey": "{{ openzro_management_datastore_key }}",
+    "StoreConfig": {
+        "Engine": "{{ openzro_management_datastore_engine }}"
+{% if openzro_management_datastore_engine == "postgres" %}
+        ,"Postgres": "{{ openzro_postgres_dsn }}"
+{% endif %}
+    },
+    "HttpConfig": {
+        "Address": "0.0.0.0:{{ openzro_management_port - 2 }}",
+        "AuthIssuer": "{{ openzro_oidc_issuer }}",
+        "AuthAudience": "{{ openzro_management_jwt_audience }}",
+        "AuthUserIDClaim": "sub",
+        "OIDCConfigEndpoint": "{{ openzro_oidc_issuer }}/.well-known/openid-configuration",
+        "IdpSignKeyRefreshEnabled": true
+    },
+    "IdpManagerConfig": {
+        "ManagerType": "none"
+    }
+}

@@ -1,0 +1,13 @@
+---
+# The dashboard role currently runs the upstream container image
+# under docker compose. When openzro/openzro ships a native
+# `openzro-dashboard` deb/rpm (nginx + static export), swap this
+# role's tasks/main.yml for the same apt/dnf install pattern as
+# management/signal/relay.
+
+openzro_dashboard_image: "ghcr.io/openzro/dashboard"
+openzro_dashboard_image_tag: "{{ openzro_version | default('latest') }}"
+openzro_dashboard_listen_port: 8080
+
+openzro_dashboard_compose_dir: /etc/openzro/dashboard
+openzro_dashboard_data_dir:    /var/lib/openzro/dashboard

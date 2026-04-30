@@ -1,0 +1,5 @@
+---
+openzro_signal_package: openzro-signal
+openzro_signal_env_file: /etc/default/openzro-signal
+openzro_signal_service: openzro-signal.service
+openzro_signal_port: 10000

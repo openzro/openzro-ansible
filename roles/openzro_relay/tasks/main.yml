@@ -1,0 +1,32 @@
+---
+- name: Install openzro-relay package (apt)
+  ansible.builtin.apt:
+    name: "{{ openzro_relay_package }}{{ ('=' + openzro_version) if openzro_version is defined else '' }}"
+    state: present
+    update_cache: true
+  when: ansible_pkg_mgr == "apt"
+  notify: restart openzro-relay
+
+- name: Install openzro-relay package (dnf/yum)
+  ansible.builtin.dnf:
+    name: "{{ openzro_relay_package }}{{ ('-' + openzro_version) if openzro_version is defined else '' }}"
+    state: present
+  when: ansible_pkg_mgr in ["dnf", "yum"]
+  notify: restart openzro-relay
+
+- name: Render systemd EnvironmentFile
+  ansible.builtin.template:
+    src: openzro-relay.env.j2
+    dest: "{{ openzro_relay_env_file }}"
+    owner: root
+    group: openzro
+    mode: "0640"
+    backup: true
+  notify: restart openzro-relay
+
+- name: Enable + start openzro-relay
+  ansible.builtin.systemd:
+    name: "{{ openzro_relay_service }}"
+    enabled: true
+    state: started
+    daemon_reload: true

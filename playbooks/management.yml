@@ -1,0 +1,12 @@
+---
+- name: Common (apt/yum repo + GPG key)
+  hosts: management
+  become: true
+  roles:
+    - common
+
+- name: Management
+  hosts: management
+  become: true
+  roles:
+    - openzro_management

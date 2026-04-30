@@ -1,0 +1,12 @@
+---
+- name: Common
+  hosts: relay
+  become: true
+  roles:
+    - common
+
+- name: Relay
+  hosts: relay
+  become: true
+  roles:
+    - openzro_relay

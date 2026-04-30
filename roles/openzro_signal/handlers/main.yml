@@ -1,0 +1,6 @@
+---
+- name: restart openzro-signal
+  ansible.builtin.systemd:
+    name: "{{ openzro_signal_service }}"
+    state: restarted
+    daemon_reload: true

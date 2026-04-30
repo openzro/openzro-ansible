@@ -1,0 +1,32 @@
+---
+- name: Install openzro-signal package (apt)
+  ansible.builtin.apt:
+    name: "{{ openzro_signal_package }}{{ ('=' + openzro_version) if openzro_version is defined else '' }}"
+    state: present
+    update_cache: true
+  when: ansible_pkg_mgr == "apt"
+  notify: restart openzro-signal
+
+- name: Install openzro-signal package (dnf/yum)
+  ansible.builtin.dnf:
+    name: "{{ openzro_signal_package }}{{ ('-' + openzro_version) if openzro_version is defined else '' }}"
+    state: present
+  when: ansible_pkg_mgr in ["dnf", "yum"]
+  notify: restart openzro-signal
+
+- name: Render systemd EnvironmentFile
+  ansible.builtin.template:
+    src: openzro-signal.env.j2
+    dest: "{{ openzro_signal_env_file }}"
+    owner: root
+    group: openzro
+    mode: "0640"
+    backup: true
+  notify: restart openzro-signal
+
+- name: Enable + start openzro-signal
+  ansible.builtin.systemd:
+    name: "{{ openzro_signal_service }}"
+    enabled: true
+    state: started
+    daemon_reload: true

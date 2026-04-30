@@ -1,0 +1,12 @@
+---
+- name: Common
+  hosts: dashboard
+  become: true
+  roles:
+    - common
+
+- name: Dashboard
+  hosts: dashboard
+  become: true
+  roles:
+    - openzro_dashboard

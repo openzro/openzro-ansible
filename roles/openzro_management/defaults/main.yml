@@ -1,0 +1,22 @@
+---
+# Defaults — all overridable via group_vars or host_vars.
+
+openzro_management_package: openzro-management
+openzro_management_data_dir: /var/lib/openzro/management
+openzro_management_config_dir: /etc/openzro
+openzro_management_config_path: "{{ openzro_management_config_dir }}/management.json"
+openzro_management_env_file: /etc/default/openzro-management
+openzro_management_service: openzro-management.service
+
+# Listening port — gRPC + REST. Public via the dashboard's nginx
+# proxy on /api and /management.ManagementService.
+openzro_management_port: 33073
+
+# JWT — the management server validates Dex/Keycloak/Auth0 issued
+# tokens against the issuer's JWKS. The role passes these into
+# management.json's HttpConfig block.
+openzro_management_jwt_audience: "{{ openzro_oidc_client_id }}"
+
+# Datastore — see group_vars/all.yml for engine selection.
+openzro_management_datastore_engine: "{{ openzro_datastore_engine | default('sqlite') }}"
+openzro_management_sqlite_path: "{{ openzro_management_data_dir }}/store.db"

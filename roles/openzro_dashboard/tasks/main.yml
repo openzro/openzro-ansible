@@ -1,0 +1,55 @@
+---
+# Stand-in dashboard role: pulls the upstream container and runs it
+# under docker compose. Replace this with apt/dnf install once the
+# native openzro-dashboard package ships.
+
+- name: Ensure docker engine is installed
+  ansible.builtin.package:
+    name: docker.io
+    state: present
+  when: ansible_pkg_mgr == "apt"
+
+- name: Ensure docker engine is installed (dnf/yum)
+  ansible.builtin.package:
+    name: docker
+    state: present
+  when: ansible_pkg_mgr in ["dnf", "yum"]
+
+- name: Ensure docker daemon is running
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Compose dir
+  ansible.builtin.file:
+    path: "{{ openzro_dashboard_compose_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Render docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ openzro_dashboard_compose_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0640"
+  register: dashboard_compose
+
+- name: Render dashboard env file
+  ansible.builtin.template:
+    src: dashboard.env.j2
+    dest: "{{ openzro_dashboard_compose_dir }}/.env"
+    owner: root
+    group: root
+    mode: "0640"
+  register: dashboard_env
+
+- name: Up the dashboard stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ openzro_dashboard_compose_dir }}"
+    state: present
+    pull: always
+  when: dashboard_compose.changed or dashboard_env.changed
