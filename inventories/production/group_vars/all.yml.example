@@ -23,10 +23,18 @@ openzro_relay_auth_secret: !vault |
   $ANSIBLE_VAULT;1.1;AES256
   REPLACE_WITH_VAULTED_RANDOM_32B
 
-# Production TLS — mount your real cert chain.
-openzro_self_signed_tls: false
-openzro_tls_cert_path: /etc/letsencrypt/live/openzro.example.com/fullchain.pem
-openzro_tls_key_path:  /etc/letsencrypt/live/openzro.example.com/privkey.pem
+# Production TLS — let certbot manage the cert + auto-renewal.
+openzro_tls_mode: certbot_http
+openzro_tls_email: admin@example.com
+
+# Or — DNS-01 (wildcard / behind firewall):
+# openzro_tls_mode: certbot_dns
+# openzro_tls_cloudflare_api_token: !vault |
+#   $ANSIBLE_VAULT;1.1;AES256
+#   REPLACE_WITH_VAULTED_TOKEN
+
+# Cloud LB — pick the cloud the prod host runs on.
+openzro_cloud: aws   # or gcp
 
 openzro_log_level: "info"
 openzro_version: "0.53.1-alpha.9"

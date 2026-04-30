@@ -1,0 +1,27 @@
+---
+# Lab / dev only. Generates a self-signed cert on the target on
+# first run — clients will warn loudly because the issuer isn't
+# trusted. Use certbot_http or certbot_dns for anything real.
+
+- name: Install openssl (for self-signed cert generation)
+  ansible.builtin.package:
+    name: openssl
+    state: present
+
+- name: Generate self-signed cert + key
+  ansible.builtin.command:
+    cmd: >-
+      openssl req -x509 -newkey rsa:4096 -nodes
+      -keyout {{ openzro_tls_key_effective }}
+      -out   {{ openzro_tls_cert_effective }}
+      -days 365
+      -subj "/CN={{ openzro_public_domain }}"
+      -addext "subjectAltName=DNS:{{ openzro_public_domain }}"
+    creates: "{{ openzro_tls_cert_effective }}"
+
+- name: Lock down self-signed key permissions
+  ansible.builtin.file:
+    path: "{{ openzro_tls_key_effective }}"
+    owner: root
+    group: root
+    mode: "0600"

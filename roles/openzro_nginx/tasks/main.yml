@@ -1,0 +1,68 @@
+---
+# Install nginx, render the openzro site, and acquire/install a
+# TLS cert via the operator-chosen mode (default: certbot HTTP-01).
+
+- name: Validate TLS mode
+  ansible.builtin.assert:
+    that:
+      - openzro_tls_mode in ["certbot_http", "certbot_dns", "byo", "self_signed"]
+    fail_msg: >-
+      openzro_tls_mode must be one of: certbot_http, certbot_dns,
+      byo, self_signed. Got: '{{ openzro_tls_mode }}'.
+
+- name: Install nginx
+  ansible.builtin.package:
+    name: "{{ openzro_nginx_package }}"
+    state: present
+
+- name: Ensure openzro tls dir exists
+  ansible.builtin.file:
+    path: /etc/openzro/tls
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+# Cert acquisition — included file per mode keeps each path
+# self-contained and easy to skip when ansible -t is used to
+# target only one of them.
+- name: Acquire TLS cert (certbot HTTP-01)
+  ansible.builtin.include_tasks: cert-certbot-http.yml
+  when: openzro_tls_mode == "certbot_http"
+
+- name: Acquire TLS cert (certbot DNS-01)
+  ansible.builtin.include_tasks: cert-certbot-dns.yml
+  when: openzro_tls_mode == "certbot_dns"
+
+- name: Install operator-provided cert
+  ansible.builtin.include_tasks: cert-byo.yml
+  when: openzro_tls_mode == "byo"
+
+- name: Generate self-signed cert (lab/dev)
+  ansible.builtin.include_tasks: cert-self-signed.yml
+  when: openzro_tls_mode == "self_signed"
+
+# Site config + activation. The default site (sites-enabled/default)
+# stays in place — the openzro site uses the operator's hostname
+# only, so the two won't collide.
+- name: Render openzro nginx site
+  ansible.builtin.template:
+    src: openzro.conf.j2
+    dest: "{{ openzro_nginx_site_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload nginx
+
+- name: Enable openzro nginx site
+  ansible.builtin.file:
+    src: "{{ openzro_nginx_site_path }}"
+    dest: "{{ openzro_nginx_enabled_path }}"
+    state: link
+  notify: reload nginx
+
+- name: Ensure nginx is running and enabled
+  ansible.builtin.systemd:
+    name: "{{ openzro_nginx_service }}"
+    enabled: true
+    state: started

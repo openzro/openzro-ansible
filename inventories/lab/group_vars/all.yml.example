@@ -44,14 +44,34 @@ openzro_datastore_engine: "sqlite"   # sqlite | postgres
 openzro_relay_auth_secret: "REPLACE_WITH_BASE64_RANDOM_32B"
 
 # ---------------------------------------------------------------------
-# TLS — bring your own cert/key (PEM). The role copies these into
-# /etc/openzro/tls/ and references them from management.json. For a
-# lab, set openzro_self_signed_tls: true to have the role generate
-# a self-signed cert on first run.
+# TLS / cert handling. The openzro_nginx role implements four modes:
+#
+#   certbot_http  — Let's Encrypt via HTTP-01 (default for prod).
+#                   Host must be reachable on port 80. Auto-renews
+#                   via the certbot.timer systemd unit.
+#   certbot_dns   — Let's Encrypt via DNS-01 (Cloudflare today).
+#                   Works behind a firewall, supports wildcard.
+#                   Set openzro_tls_cloudflare_api_token below.
+#   byo           — Bring your own cert files from the control host.
+#   self_signed   — Generate a self-signed cert (LAB ONLY).
 # ---------------------------------------------------------------------
-openzro_self_signed_tls: true
-# openzro_tls_cert_path: /path/on/control-host/fullchain.pem
-# openzro_tls_key_path:  /path/on/control-host/privkey.pem
+openzro_tls_mode: self_signed   # lab default — switch to certbot_http for prod
+
+# certbot_http / certbot_dns
+# openzro_tls_email: admin@example.com
+
+# certbot_dns — Cloudflare API token (vault-encrypt this)
+# openzro_tls_cloudflare_api_token: !vault | $ANSIBLE_VAULT;1.1;AES256...
+
+# byo — paths on the CONTROL host (Ansible reads + pushes contents)
+# openzro_tls_cert_path: /etc/letsencrypt/live/example.com/fullchain.pem
+# openzro_tls_key_path:  /etc/letsencrypt/live/example.com/privkey.pem
+
+# ---------------------------------------------------------------------
+# Cloud LB — only relevant when running this playbook against a host
+# in AWS or GCP. Set to "none" for bare-metal / VPS / on-prem.
+# ---------------------------------------------------------------------
+openzro_cloud: none   # none | aws | gcp
 
 # ---------------------------------------------------------------------
 # Operational tuning — usually leave at defaults.

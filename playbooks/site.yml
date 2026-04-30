@@ -5,6 +5,10 @@
 #  3. relay   — needs the auth secret, no other deps
 #  4. management — needs OIDC + datastore reachable, drives the rest
 #  5. dashboard — HTTP frontend; relies on management's REST API
+#  6. nginx   — TLS termination + reverse proxy (last so all
+#               upstreams already exist)
+#  7. cloud_lb — only when openzro_cloud != "none" — point an AWS
+#                ALB / GCP forwarding rule at the host's nginx
 
 - name: Common (apt/yum repo + GPG key)
   hosts: all
@@ -35,3 +39,19 @@
   become: true
   roles:
     - openzro_dashboard
+
+- name: nginx (TLS termination + reverse proxy)
+  hosts: dashboard
+  become: true
+  roles:
+    - openzro_nginx
+
+- name: Cloud LB (AWS or GCP — operator's choice via openzro_cloud)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: aws_lb
+      when: openzro_cloud | default('none') == 'aws'
+    - role: gcp_lb
+      when: openzro_cloud | default('none') == 'gcp'

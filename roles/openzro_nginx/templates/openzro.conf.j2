@@ -1,0 +1,117 @@
+# {{ ansible_managed }}
+#
+# nginx in front of the openZro stack. TLS termination + reverse
+# proxy for management REST + management gRPC + signal gRPC + the
+# dashboard SPA.
+#
+# Topology assumed: nginx, management, signal on the same host or
+# reachable over a private network. Relay is L4 (UDP/TCP 33080)
+# and does NOT go through nginx — it's exposed at the firewall /
+# cloud LB directly.
+
+upstream openzro_management_rest {
+    server {{ openzro_nginx_management_rest_upstream }};
+    keepalive 32;
+}
+
+upstream openzro_management_grpc {
+    server {{ openzro_nginx_management_grpc_upstream }};
+    keepalive 32;
+}
+
+upstream openzro_signal_grpc {
+    server {{ openzro_nginx_signal_grpc_upstream }};
+    keepalive 32;
+}
+
+# HTTP — redirect to HTTPS, except the ACME challenge path so
+# certbot.timer can renew the cert without taking the site down.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ openzro_public_domain }};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# HTTPS — the real site.
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name {{ openzro_public_domain }};
+
+    ssl_certificate     {{ openzro_tls_cert_effective }};
+    ssl_certificate_key {{ openzro_tls_key_effective }};
+
+    # Modern TLS only. Drops TLS 1.0/1.1 and old ciphers.
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # OCSP stapling for cert revocation checks at handshake time.
+    ssl_stapling on;
+    ssl_stapling_verify on;
+
+    # Security headers.
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Allow large gRPC bodies (peer state can be substantial).
+    client_max_body_size 32m;
+
+    # Management gRPC. Path is the protobuf service FQN.
+    location /management.ManagementService {
+        grpc_pass grpc://openzro_management_grpc;
+        grpc_read_timeout 86400s;
+        grpc_send_timeout 86400s;
+        grpc_socket_keepalive on;
+    }
+
+    # Signal gRPC. Same protobuf-service-FQN convention.
+    location /signalexchange.SignalExchange {
+        grpc_pass grpc://openzro_signal_grpc;
+        grpc_read_timeout 86400s;
+        grpc_send_timeout 86400s;
+        grpc_socket_keepalive on;
+    }
+
+    # Management REST API.
+    location /api {
+        proxy_pass http://openzro_management_rest;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+{% if openzro_nginx_serve_dashboard %}
+    # Dashboard SPA (Next.js static export).
+    # try_files falls back to index.html so client-side routing
+    # doesn't 404 on direct deep-links.
+    location / {
+        root {{ openzro_nginx_dashboard_root }};
+        try_files $uri $uri/ /index.html;
+    }
+{% else %}
+    # Dashboard not served by this nginx — front it elsewhere
+    # (Cloudflare Pages, S3+CloudFront, separate host). Anyone
+    # hitting / on this nginx gets a hint instead of a 404.
+    location / {
+        return 200 "openZro management API. Front the dashboard separately.\n";
+        add_header Content-Type text/plain;
+    }
+{% endif %}
+}

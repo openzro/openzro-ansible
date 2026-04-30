@@ -1,0 +1,20 @@
+# {{ ansible_managed }}
+#
+# Bootstrap site — used ONLY during the first certbot HTTP-01
+# acquisition before we have a TLS cert. After certbot succeeds,
+# the role overwrites this file with openzro.conf.j2 (HTTPS site).
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ openzro_public_domain }};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 503 "openZro is provisioning TLS — try again in a moment\n";
+        add_header Content-Type text/plain;
+    }
+}

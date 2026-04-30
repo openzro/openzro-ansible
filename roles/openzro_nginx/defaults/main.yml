@@ -1,0 +1,66 @@
+---
+# nginx in front of the openzro stack — terminates TLS, proxies the
+# REST + gRPC paths to the management/signal upstreams, optionally
+# serves the dashboard static bundle from a sibling package.
+
+openzro_nginx_package: nginx
+openzro_nginx_service: nginx
+openzro_nginx_site_name: openzro
+openzro_nginx_site_path: "/etc/nginx/sites-available/{{ openzro_nginx_site_name }}"
+openzro_nginx_enabled_path: "/etc/nginx/sites-enabled/{{ openzro_nginx_site_name }}"
+
+# Where the dashboard static files live (drop-in by the
+# openzro-dashboard deb/rpm). Set to false to skip dashboard
+# serving entirely — useful if you front the dashboard with
+# something else (Cloudflare Pages, S3+CloudFront, etc.).
+openzro_nginx_serve_dashboard: true
+openzro_nginx_dashboard_root: /usr/share/openzro-dashboard
+
+# Upstream addresses — tweak per inventory if the management /
+# signal hosts aren't on the same machine as nginx. The default
+# assumes all-in-one (nginx, mgmt, signal on the same host).
+openzro_nginx_management_rest_upstream: "127.0.0.1:33071"
+openzro_nginx_management_grpc_upstream: "127.0.0.1:33073"
+openzro_nginx_signal_grpc_upstream: "127.0.0.1:10000"
+
+# ---------------------------------------------------------------------
+# TLS — pick a mode. The role implements four:
+#
+#   certbot_http  (default) — Let's Encrypt via HTTP-01. Host must be
+#                             reachable from the internet on port 80.
+#                             Cheapest setup, auto-renews via the
+#                             certbot.timer systemd unit. REQUIRES
+#                             openzro_tls_email to be set.
+#
+#   certbot_dns           — Let's Encrypt via DNS-01. Works behind
+#                             a firewall and supports wildcard certs.
+#                             Currently the role implements Cloudflare
+#                             only; PRs welcome for Route53 / Google.
+#
+#   byo                  — Bring-your-own cert (internal CA, paid
+#                             cert, etc.). Operator points at PEM
+#                             files on the control host.
+#
+#   self_signed          — Generate a self-signed cert on first run.
+#                             Lab / dev only — clients warn loudly.
+# ---------------------------------------------------------------------
+openzro_tls_mode: certbot_http
+
+# certbot_http / certbot_dns
+openzro_tls_email: ""              # admin email LE uses for renewal warnings
+
+# certbot_dns — DNS provider plugin and credentials
+openzro_tls_dns_provider: cloudflare    # only cloudflare is implemented
+openzro_tls_cloudflare_api_token: ""    # vault-encrypt this
+
+# byo — paths on the CONTROL host (Ansible reads them with file
+# lookup and pushes the contents). The role copies to
+# /etc/openzro/tls/{cert,key}.pem on the target.
+openzro_tls_cert_path: ""
+openzro_tls_key_path: ""
+
+# Computed by the cert tasks — paths on the TARGET host nginx
+# serves from. Don't override unless you're bypassing the
+# included cert tasks.
+openzro_tls_cert_effective: "/etc/openzro/tls/cert.pem"
+openzro_tls_key_effective: "/etc/openzro/tls/key.pem"

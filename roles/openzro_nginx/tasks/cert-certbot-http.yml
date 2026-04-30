@@ -1,0 +1,89 @@
+---
+# Let's Encrypt via HTTP-01 challenge. Default cert path. The host
+# must be reachable from the public internet on port 80 — certbot
+# spins up its own listener for the challenge (or piggybacks on
+# nginx via the --nginx plugin; we use webroot to keep nginx config
+# under the role's control).
+
+- name: Validate openzro_tls_email is set
+  ansible.builtin.assert:
+    that:
+      - openzro_tls_email | length > 0
+    fail_msg: >-
+      openzro_tls_email must be set when openzro_tls_mode = certbot_http.
+      It's the address Let's Encrypt uses to send renewal warnings.
+
+- name: Install certbot
+  ansible.builtin.package:
+    name: certbot
+    state: present
+
+- name: Webroot for HTTP-01 challenges
+  ansible.builtin.file:
+    path: /var/www/certbot
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# Bootstrap nginx with a minimal config that serves /.well-known/
+# acme-challenge/ on port 80 BEFORE we have a cert. Without this,
+# certbot would either need to spin up its own listener (conflict
+# with nginx) or the full HTTPS site would render with no cert and
+# fail nginx -t.
+- name: Render bootstrap nginx site (HTTP-only, ACME webroot)
+  ansible.builtin.template:
+    src: openzro-bootstrap.conf.j2
+    dest: "{{ openzro_nginx_site_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable bootstrap site
+  ansible.builtin.file:
+    src: "{{ openzro_nginx_site_path }}"
+    dest: "{{ openzro_nginx_enabled_path }}"
+    state: link
+
+- name: Reload nginx for ACME bootstrap
+  ansible.builtin.systemd:
+    name: "{{ openzro_nginx_service }}"
+    state: reloaded
+    enabled: true
+
+- name: Request Let's Encrypt certificate
+  ansible.builtin.command:
+    cmd: >-
+      certbot certonly --webroot
+      -w /var/www/certbot
+      -d {{ openzro_public_domain }}
+      --email {{ openzro_tls_email }}
+      --agree-tos --non-interactive --keep-until-expiring
+    creates: "/etc/letsencrypt/live/{{ openzro_public_domain }}/fullchain.pem"
+
+- name: Symlink LE cert into the role's expected paths
+  ansible.builtin.file:
+    src: "/etc/letsencrypt/live/{{ openzro_public_domain }}/{{ item.src }}"
+    dest: "{{ item.dest }}"
+    state: link
+    force: true
+  loop:
+    - { src: "fullchain.pem", dest: "{{ openzro_tls_cert_effective }}" }
+    - { src: "privkey.pem",   dest: "{{ openzro_tls_key_effective }}" }
+
+# certbot.timer is installed by default on Debian/Ubuntu and runs
+# twice a day. On RHEL-family it's named certbot-renew.timer. We
+# enable whichever exists.
+- name: Detect certbot renewal timer
+  ansible.builtin.shell: >-
+    systemctl list-unit-files --type=timer
+    | awk '/^certbot/ {print $1; exit}'
+  register: openzro_certbot_timer
+  changed_when: false
+
+- name: Enable certbot renewal timer
+  ansible.builtin.systemd:
+    name: "{{ openzro_certbot_timer.stdout }}"
+    enabled: true
+    state: started
+  when: openzro_certbot_timer.stdout | length > 0

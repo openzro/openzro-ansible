@@ -1,0 +1,67 @@
+---
+# Let's Encrypt via DNS-01. Works behind a firewall and supports
+# wildcard certs (*.example.com). Currently only Cloudflare DNS is
+# wired — Route53 / Google / etc. are easy adds (mirror this file
+# with the matching certbot-dns-* package + creds path).
+
+- name: Validate DNS-01 prereqs
+  ansible.builtin.assert:
+    that:
+      - openzro_tls_email | length > 0
+      - openzro_tls_dns_provider == "cloudflare"
+      - openzro_tls_cloudflare_api_token | length > 0
+    fail_msg: >-
+      certbot_dns mode requires openzro_tls_email,
+      openzro_tls_dns_provider == "cloudflare" (only one
+      implemented today), and openzro_tls_cloudflare_api_token
+      (vault-encrypt this).
+
+- name: Install certbot + Cloudflare DNS plugin
+  ansible.builtin.package:
+    name:
+      - certbot
+      - python3-certbot-dns-cloudflare
+    state: present
+
+- name: Stash Cloudflare API token (root-only)
+  ansible.builtin.copy:
+    dest: /etc/letsencrypt/cloudflare.ini
+    content: |
+      dns_cloudflare_api_token = {{ openzro_tls_cloudflare_api_token }}
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Request Let's Encrypt certificate via DNS-01
+  ansible.builtin.command:
+    cmd: >-
+      certbot certonly --dns-cloudflare
+      --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini
+      -d {{ openzro_public_domain }}
+      --email {{ openzro_tls_email }}
+      --agree-tos --non-interactive --keep-until-expiring
+    creates: "/etc/letsencrypt/live/{{ openzro_public_domain }}/fullchain.pem"
+
+- name: Symlink LE cert into the role's expected paths
+  ansible.builtin.file:
+    src: "/etc/letsencrypt/live/{{ openzro_public_domain }}/{{ item.src }}"
+    dest: "{{ item.dest }}"
+    state: link
+    force: true
+  loop:
+    - { src: "fullchain.pem", dest: "{{ openzro_tls_cert_effective }}" }
+    - { src: "privkey.pem",   dest: "{{ openzro_tls_key_effective }}" }
+
+- name: Detect certbot renewal timer
+  ansible.builtin.shell: >-
+    systemctl list-unit-files --type=timer
+    | awk '/^certbot/ {print $1; exit}'
+  register: openzro_certbot_timer
+  changed_when: false
+
+- name: Enable certbot renewal timer
+  ansible.builtin.systemd:
+    name: "{{ openzro_certbot_timer.stdout }}"
+    enabled: true
+    state: started
+  when: openzro_certbot_timer.stdout | length > 0

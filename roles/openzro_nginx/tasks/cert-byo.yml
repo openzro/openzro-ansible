@@ -1,0 +1,31 @@
+---
+# Bring-your-own — read the cert + key from the control host
+# (likely an internal CA or an enterprise-issued cert) and copy
+# the contents to the target. The cert/key live under the
+# Ansible-aware path /etc/openzro/tls/ to make rotation an Ansible
+# task (re-run the playbook with new files on the control host).
+
+- name: Validate BYO cert paths are set
+  ansible.builtin.assert:
+    that:
+      - openzro_tls_cert_path | length > 0
+      - openzro_tls_key_path | length > 0
+    fail_msg: >-
+      byo mode requires openzro_tls_cert_path and openzro_tls_key_path
+      (paths on the CONTROL host pointing at PEM files).
+
+- name: Copy BYO cert to target
+  ansible.builtin.copy:
+    src: "{{ openzro_tls_cert_path }}"
+    dest: "{{ openzro_tls_cert_effective }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Copy BYO key to target
+  ansible.builtin.copy:
+    src: "{{ openzro_tls_key_path }}"
+    dest: "{{ openzro_tls_key_effective }}"
+    owner: root
+    group: root
+    mode: "0600"
