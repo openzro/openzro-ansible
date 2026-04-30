@@ -1,0 +1,50 @@
+---
+# Re-register a host with the AWS target groups after upgrade.
+# Mirror of drain.yml — same drain_host_id / drain_host_groups
+# inputs.
+
+- name: Validate undrain inputs
+  ansible.builtin.assert:
+    that:
+      - drain_host_id is defined
+      - drain_host_groups is defined
+
+- name: Re-register with controller ALB target group
+  community.aws.elb_target:
+    region: "{{ aws_region }}"
+    target_group_name: "{{ aws_alb_tg_name }}"
+    target_id: "{{ drain_host_id }}"
+    target_port: 443
+    state: present
+  when: >-
+    'management' in drain_host_groups or
+    'signal'     in drain_host_groups or
+    'dashboard'  in drain_host_groups
+
+- name: Re-register with relay NLB target groups
+  community.aws.elb_target:
+    region: "{{ aws_region }}"
+    target_group_name: "{{ item }}"
+    target_id: "{{ drain_host_id }}"
+    target_port: 33080
+    state: present
+  loop:
+    - "{{ aws_nlb_tg_udp_name }}"
+    - "{{ aws_nlb_tg_tcp_name }}"
+  when: "'relay' in drain_host_groups"
+
+- name: Wait for controller target to become healthy
+  community.aws.elb_target_info:
+    region: "{{ aws_region }}"
+    target_group_name: "{{ aws_alb_tg_name }}"
+    instance_id: "{{ drain_host_id }}"
+  register: alb_target_state
+  until: >-
+    alb_target_state.instance_target_groups | length > 0 and
+    alb_target_state.instance_target_groups[0].targets[0].target_health.state == 'healthy'
+  retries: 30
+  delay: 10
+  when: >-
+    'management' in drain_host_groups or
+    'signal'     in drain_host_groups or
+    'dashboard'  in drain_host_groups

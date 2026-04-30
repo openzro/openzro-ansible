@@ -1,0 +1,58 @@
+---
+# Drain a single host from the GCP backend pools.
+# Required vars: drain_host_name, drain_host_groups.
+
+- name: Validate drain inputs
+  ansible.builtin.assert:
+    that:
+      - drain_host_name is defined
+      - drain_host_name | length > 0
+      - drain_host_groups is defined
+
+- name: Common GCP auth fact
+  ansible.builtin.set_fact:
+    _gcp_common: &gcp_common
+      project: "{{ gcp_project }}"
+      auth_kind: "{{ gcp_auth_kind }}"
+      service_account_file: "{{ gcp_service_account_file or omit }}"
+
+# Controller tier — remove from instance group. The backend
+# service's connection_draining_timeout_sec governs how long GCP
+# waits for in-flight requests before forcing close (default 0 —
+# operators should set higher, see ADR for HA).
+- name: Remove from controller instance group
+  google.cloud.gcp_compute_instance_group:
+    name: "{{ gcp_lb_name_prefix }}-controllers-ig"
+    zone: "{{ gcp_zone }}"
+    instances: >-
+      {{ gcp_controller_instance_names
+         | difference([drain_host_name])
+         | map('regex_replace', '^', 'projects/' ~ gcp_project ~ '/zones/' ~ gcp_zone ~ '/instances/')
+         | list }}
+    state: present
+    <<: *gcp_common
+  when: >-
+    'management' in drain_host_groups or
+    'signal'     in drain_host_groups or
+    'dashboard'  in drain_host_groups
+
+# Relay tier — remove from target pool.
+- name: Remove from relay target pool
+  google.cloud.gcp_compute_target_pool:
+    name: "{{ gcp_lb_name_prefix }}-relays-pool"
+    region: "{{ gcp_region }}"
+    instances: >-
+      {{ gcp_relay_instance_names
+         | difference([drain_host_name])
+         | map('regex_replace', '^', 'projects/' ~ gcp_project ~ '/zones/' ~ gcp_zone ~ '/instances/')
+         | list }}
+    state: present
+    <<: *gcp_common
+  when: "'relay' in drain_host_groups"
+
+# Best-effort wait — GCP doesn't expose a per-target drain status
+# the way AWS does, so we just sleep for the connection draining
+# timeout window (defaults to 30s if unset on the backend service).
+- name: Sleep through GCP connection-drain window
+  ansible.builtin.pause:
+    seconds: "{{ gcp_drain_timeout | default(30) }}"

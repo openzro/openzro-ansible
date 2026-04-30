@@ -1,0 +1,65 @@
+---
+# Re-register a host with the GCP backend pools after upgrade.
+
+- name: Validate undrain inputs
+  ansible.builtin.assert:
+    that:
+      - drain_host_name is defined
+      - drain_host_groups is defined
+
+- name: Common GCP auth fact
+  ansible.builtin.set_fact:
+    _gcp_common: &gcp_common
+      project: "{{ gcp_project }}"
+      auth_kind: "{{ gcp_auth_kind }}"
+      service_account_file: "{{ gcp_service_account_file or omit }}"
+
+- name: Re-add to controller instance group
+  google.cloud.gcp_compute_instance_group:
+    name: "{{ gcp_lb_name_prefix }}-controllers-ig"
+    zone: "{{ gcp_zone }}"
+    instances: >-
+      {{ gcp_controller_instance_names
+         | map('regex_replace', '^', 'projects/' ~ gcp_project ~ '/zones/' ~ gcp_zone ~ '/instances/')
+         | list }}
+    state: present
+    <<: *gcp_common
+  when: >-
+    'management' in drain_host_groups or
+    'signal'     in drain_host_groups or
+    'dashboard'  in drain_host_groups
+
+- name: Re-add to relay target pool
+  google.cloud.gcp_compute_target_pool:
+    name: "{{ gcp_lb_name_prefix }}-relays-pool"
+    region: "{{ gcp_region }}"
+    instances: >-
+      {{ gcp_relay_instance_names
+         | map('regex_replace', '^', 'projects/' ~ gcp_project ~ '/zones/' ~ gcp_zone ~ '/instances/')
+         | list }}
+    state: present
+    <<: *gcp_common
+  when: "'relay' in drain_host_groups"
+
+# Wait for the LB to mark the backend healthy. Mirror of AWS's
+# elb_target_info polling, but GCP doesn't have a single API for
+# this — we poll the BackendService's getHealth endpoint via raw
+# REST. Cap retries at 30 (5 minutes) — most healthchecks pass
+# within 30-60s.
+- name: Wait for backend to be healthy
+  ansible.builtin.command:
+    cmd: >-
+      gcloud compute backend-services get-health
+        {{ gcp_lb_name_prefix }}-controllers-bs
+        --global
+        --project={{ gcp_project }}
+        --format='value(status.healthStatus[0].healthState)'
+  register: gcp_health
+  until: gcp_health.stdout == "HEALTHY"
+  retries: 30
+  delay: 10
+  changed_when: false
+  when: >-
+    ('management' in drain_host_groups or
+     'signal'     in drain_host_groups or
+     'dashboard'  in drain_host_groups)

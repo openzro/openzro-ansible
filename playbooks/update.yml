@@ -1,0 +1,176 @@
+---
+# Rolling update of an openZro deployment. Drains each host from
+# the cloud LB, upgrades it, waits for systemd to mark the service
+# active, re-adds it to the LB, waits for the LB to mark it
+# healthy, then moves to the next host.
+#
+# Usage:
+#
+#   ansible-playbook -i inventories/prod playbooks/update.yml
+#
+# Pinning a version: set openzro_version=0.53.1-alpha.X in
+# group_vars or via -e on the command line. With the var unset
+# the play upgrades to whatever apt/yum considers latest in the
+# pkg.openzro.io repo.
+#
+# Single-host (lab) deployments don't need any of this drain
+# choreography — just re-run site.yml. The cloud-LB drain steps
+# are no-ops when openzro_cloud == "none".
+
+- name: Rolling update — control plane (mgmt + signal + dashboard)
+  hosts: management:signal:dashboard
+  serial: 1
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Drain from cloud LB (AWS)
+      ansible.builtin.include_role:
+        name: aws_lb
+        tasks_from: drain.yml
+      delegate_to: localhost
+      vars:
+        drain_host_id: "{{ aws_instance_id }}"
+        drain_host_groups: "{{ group_names }}"
+      when:
+        - openzro_cloud | default('none') == 'aws'
+        - aws_instance_id is defined
+
+    - name: Drain from cloud LB (GCP)
+      ansible.builtin.include_role:
+        name: gcp_lb
+        tasks_from: drain.yml
+      delegate_to: localhost
+      vars:
+        drain_host_name: "{{ gcp_instance_name }}"
+        drain_host_groups: "{{ group_names }}"
+      when:
+        - openzro_cloud | default('none') == 'gcp'
+        - gcp_instance_name is defined
+
+  roles:
+    - { role: common }
+    - { role: openzro_management, when: "'management' in group_names" }
+    - { role: openzro_signal,     when: "'signal'     in group_names" }
+    - { role: openzro_dashboard,  when: "'dashboard'  in group_names" }
+
+  post_tasks:
+    - name: Wait for management gRPC to be reachable locally
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 33073
+        timeout: 60
+      when: "'management' in group_names"
+
+    - name: Wait for signal gRPC to be reachable locally
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 10000
+        timeout: 60
+      when: "'signal' in group_names"
+
+    - name: Wait for nginx to serve dashboard
+      ansible.builtin.uri:
+        url: "https://127.0.0.1/"
+        validate_certs: false
+        status_code: [200, 401, 503]
+      register: dashboard_probe
+      until: dashboard_probe.status in [200, 401]
+      retries: 12
+      delay: 5
+      when: "'dashboard' in group_names"
+
+    - name: Re-add to cloud LB (AWS)
+      ansible.builtin.include_role:
+        name: aws_lb
+        tasks_from: undrain.yml
+      delegate_to: localhost
+      vars:
+        drain_host_id: "{{ aws_instance_id }}"
+        drain_host_groups: "{{ group_names }}"
+      when:
+        - openzro_cloud | default('none') == 'aws'
+        - aws_instance_id is defined
+
+    - name: Re-add to cloud LB (GCP)
+      ansible.builtin.include_role:
+        name: gcp_lb
+        tasks_from: undrain.yml
+      delegate_to: localhost
+      vars:
+        drain_host_name: "{{ gcp_instance_name }}"
+        drain_host_groups: "{{ group_names }}"
+      when:
+        - openzro_cloud | default('none') == 'gcp'
+        - gcp_instance_name is defined
+
+# Relay tier upgrades separately — its data plane is independent
+# of the control plane (peers stay connected through other relays
+# while one is down). Same drain/upgrade/undrain pattern.
+- name: Rolling update — relay tier
+  hosts: relay
+  serial: 1
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Drain relay from NLB (AWS)
+      ansible.builtin.include_role:
+        name: aws_lb
+        tasks_from: drain.yml
+      delegate_to: localhost
+      vars:
+        drain_host_id: "{{ aws_instance_id }}"
+        drain_host_groups: "{{ group_names }}"
+      when:
+        - openzro_cloud | default('none') == 'aws'
+        - aws_instance_id is defined
+
+    - name: Drain relay from Network LB (GCP)
+      ansible.builtin.include_role:
+        name: gcp_lb
+        tasks_from: drain.yml
+      delegate_to: localhost
+      vars:
+        drain_host_name: "{{ gcp_instance_name }}"
+        drain_host_groups: "{{ group_names }}"
+      when:
+        - openzro_cloud | default('none') == 'gcp'
+        - gcp_instance_name is defined
+
+  roles:
+    - common
+    - openzro_relay
+
+  post_tasks:
+    - name: Wait for relay TCP socket
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 33080
+        timeout: 60
+
+    - name: Re-add relay to NLB (AWS)
+      ansible.builtin.include_role:
+        name: aws_lb
+        tasks_from: undrain.yml
+      delegate_to: localhost
+      vars:
+        drain_host_id: "{{ aws_instance_id }}"
+        drain_host_groups: "{{ group_names }}"
+      when:
+        - openzro_cloud | default('none') == 'aws'
+        - aws_instance_id is defined
+
+    - name: Re-add relay to Network LB (GCP)
+      ansible.builtin.include_role:
+        name: gcp_lb
+        tasks_from: undrain.yml
+      delegate_to: localhost
+      vars:
+        drain_host_name: "{{ gcp_instance_name }}"
+        drain_host_groups: "{{ group_names }}"
+      when:
+        - openzro_cloud | default('none') == 'gcp'
+        - gcp_instance_name is defined

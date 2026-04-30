@@ -1,0 +1,63 @@
+---
+# Drain a single host from the AWS target groups in front of
+# openZro. Called from playbooks/update.yml with delegate_to:
+# localhost so the cloud API runs from the control host while the
+# actual upgrade work runs on the target.
+#
+# Required vars (passed at include time):
+#   drain_host_id     EC2 instance ID (i-0123…) of the host to drain
+#   drain_host_groups Ansible group_names list (so we know which
+#                     target groups to deregister from — relays only
+#                     come out of the NLB pools, controllers only
+#                     come out of the ALB pool)
+
+- name: Validate drain inputs
+  ansible.builtin.assert:
+    that:
+      - drain_host_id is defined
+      - drain_host_id | length > 0
+      - drain_host_groups is defined
+
+- name: Deregister from controller ALB target group
+  community.aws.elb_target:
+    region: "{{ aws_region }}"
+    target_group_name: "{{ aws_alb_tg_name }}"
+    target_id: "{{ drain_host_id }}"
+    target_port: 443
+    state: absent
+  when: >-
+    'management' in drain_host_groups or
+    'signal'     in drain_host_groups or
+    'dashboard'  in drain_host_groups
+
+- name: Deregister from relay NLB target groups
+  community.aws.elb_target:
+    region: "{{ aws_region }}"
+    target_group_name: "{{ item }}"
+    target_id: "{{ drain_host_id }}"
+    target_port: 33080
+    state: absent
+  loop:
+    - "{{ aws_nlb_tg_udp_name }}"
+    - "{{ aws_nlb_tg_tcp_name }}"
+  when: "'relay' in drain_host_groups"
+
+# Wait for the deregistration_delay window — by default 300s but
+# operators bring this down for short upgrade windows. The role
+# uses elb_target_info to poll until the target's state is
+# 'unused' (drain finished) or 'draining' is not present.
+- name: Wait for controller drain to complete
+  community.aws.elb_target_info:
+    region: "{{ aws_region }}"
+    target_group_name: "{{ aws_alb_tg_name }}"
+    instance_id: "{{ drain_host_id }}"
+  register: alb_target_state
+  until: >-
+    alb_target_state.instance_target_groups | length == 0 or
+    (alb_target_state.instance_target_groups[0].targets[0].target_health.state | default('unused')) == 'unused'
+  retries: 30
+  delay: 10
+  when: >-
+    'management' in drain_host_groups or
+    'signal'     in drain_host_groups or
+    'dashboard'  in drain_host_groups

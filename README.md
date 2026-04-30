@@ -90,6 +90,68 @@ See [openzro/openzro/docs/adr/0008](https://github.com/openzro/openzro/blob/main
 for the K8s/helm-chart parallel — the Ansible flow targets the same
 production-shape but on bare metal.
 
+## Rolling updates (zero-downtime)
+
+For HA deployments behind an LB, use `playbooks/update.yml` —
+**not** `site.yml` — to upgrade. The update playbook does the
+drain/upgrade/undrain dance per host:
+
+```sh
+ansible-playbook -i inventories/prod playbooks/update.yml \
+    -e openzro_version=0.53.1-alpha.X
+```
+
+Per host, in order:
+
+1. Deregister the host from the cloud LB target pool
+2. Wait for the `deregistration_delay` (AWS) or
+   `connection_draining_timeout_sec` (GCP) — in-flight requests
+   finish without being severed
+3. Run the role tasks (apt/yum/pacman upgrade + systemd restart)
+4. Wait for the local service to bind its port
+5. Re-register the host with the LB target pool
+6. Wait for the LB health check to mark the host `healthy`
+7. Move to the next host
+
+`serial: 1` on each play guarantees only one host is out of
+rotation at a time — pace governed by your LB's drain timeout
+plus the package install time. Plan ~2–3 minutes per host with
+default settings.
+
+The control plane (mgmt + signal + dashboard) updates first,
+then the relay tier — separate play so the playbook doesn't take
+mgmt down at the same time as a relay (peers reconnecting fall
+back to other relays, but mgmt downtime affects new peer joins).
+
+**Required per-host vars for the update:**
+
+```yaml
+# inventories/prod/hosts.yml — per host
+controller1:
+  ansible_host: …
+  aws_instance_id: i-0123456789abcdef0   # for openzro_cloud=aws
+  # OR
+  gcp_instance_name: openzro-controller1 # for openzro_cloud=gcp
+```
+
+Without those, the drain/undrain steps skip with a warning and
+the playbook upgrades in-place — which is the right behaviour
+for the lab/single-host case (no LB to drain from anyway).
+
+### What if a host fails mid-upgrade?
+
+`any_errors_fatal: true` halts the play immediately. The current
+host stays drained. Diagnose, fix the issue, then re-run the same
+playbook — the host re-registers in the post_tasks of the next
+run.
+
+### Single-host (no LB) deployments
+
+Re-run `playbooks/site.yml`. The roles' `notify: restart …`
+handlers cause a brief restart; in-flight requests fail (~5–10s)
+but everything else stays put. No drain logic is exercised because
+there's nowhere to drain to.
+
 ## Recommended infrastructure sizing
 
 The numbers below are starting points based on observed footprints
