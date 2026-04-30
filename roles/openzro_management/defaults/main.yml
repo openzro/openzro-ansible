@@ -20,3 +20,35 @@ openzro_management_jwt_audience: "{{ openzro_oidc_client_id }}"
 # Datastore — see group_vars/all.yml for engine selection.
 openzro_management_datastore_engine: "{{ openzro_datastore_engine | default('sqlite') }}"
 openzro_management_sqlite_path: "{{ openzro_management_data_dir }}/store.db"
+
+# ---------------------------------------------------------------------
+# Cluster coordinator — leave at "none" for single-replica.
+# For HA management, set to "embedded" (recommended — no external
+# broker needed) and let the role auto-derive openzro_cluster_peers
+# from the `management` host group.
+#
+#   none      — single-replica, no coordination
+#   embedded  — each management process embeds a NATS+JetStream server
+#               and gossips with peers on tcp/6222 (default port)
+#   nats      — connect to an external NATS broker
+#   redis     — connect to an external Redis-compatible server
+# ---------------------------------------------------------------------
+openzro_cluster_backend: "{{ 'embedded' if (groups['management'] | default([])) | length > 1 else 'none' }}"
+
+# Auto-derived peer list: every OTHER management host in the
+# inventory, addressed by its private IP / hostname on tcp/6222.
+# Override in group_vars to point at specific names if your
+# topology has private DNS or a separate management network.
+openzro_cluster_peer_port: 6222
+openzro_cluster_peers: >-
+  {{ groups['management'] | default([])
+     | difference([inventory_hostname])
+     | map('extract', hostvars, ['ansible_host'])
+     | map('regex_replace', '^', 'nats://')
+     | map('regex_replace', '$', ':' ~ openzro_cluster_peer_port)
+     | list }}
+
+# External-broker variants (only used when openzro_cluster_backend
+# is "nats" or "redis"). Vault-encrypt these in real inventories.
+openzro_cluster_nats_url: ""
+openzro_cluster_redis_url: ""
