@@ -26,17 +26,26 @@ inventories/
   lab/         # personal lab cluster (single host, all-in-one)
   production/  # multi-host, HA candidate
 playbooks/
-  site.yml         # full stack on the inventory
+  site.yml         # full stack provisioning
+  update.yml       # rolling update with cloud LB drain/undrain
   management.yml   # just management
   signal.yml       # just signal
   relay.yml        # just relay
   dashboard.yml    # just dashboard
 roles/
-  common/              # apt/yum repo setup, GPG key import
-  openzro_management/  # postgres DSN, dex grpc, JWT, datastore
-  openzro_signal/      # stateless rendezvous server
-  openzro_relay/       # WireGuard relay (TURN-like)
-  openzro_dashboard/   # nginx + container OR future deb/rpm pkg
+  common/                # apt/yum repo setup, GPG key import
+  openzro_management/    # mgmt daemon, postgres DSN, OIDC, datastore,
+                         #   cluster coordinator wiring (embedded NATS by default)
+  openzro_signal/        # stateless rendezvous server
+  openzro_relay/         # WireGuard relay (TURN-like)
+  openzro_dashboard/     # apt install + render env + nginx config
+  openzro_nginx/         # nginx in front, certbot HTTP-01/DNS-01/BYO/self-signed
+  openzro_nats_cluster/  # OPTIONAL — standalone nats-server cluster between
+                         #   management hosts (alt to embedded NATS)
+  openzro_redis_cluster/ # OPTIONAL — standalone redis (master/replica) between
+                         #   management hosts
+  aws_lb/                # ALB + NLB + ACM + Route53 (when openzro_cloud=aws)
+  gcp_lb/                # HTTPS LB + NLB + managed cert + Cloud DNS (gcp)
 ```
 
 ## Quick start (lab)
@@ -88,7 +97,7 @@ varies:
 | `signal` | ✅ | ✅ Yes | Drop N hosts in the `signal` group; the cloud LB role distributes traffic. Clients fall over via `Signal.URI` rotation in `management.json`. |
 | `relay` | ✅ | ✅ Yes | Clients learn all relays via `management.json`'s `Relay.Addresses[]` and probe multiple in parallel. Add hosts to the `relay` group; the NLB load-balances. |
 | `dashboard` | ✅ (static files) | ✅ Yes | Multiple controllers all serve identical static files; nginx does the work. |
-| `management` | ❌ (writes datastore) | ⚠️ **Pending** — needs cluster coordinator | Today the role writes a single-node `management.json`. Multiple management replicas writing to the same Postgres without a distributed lock (Redis / NATS / pg-advisory) corrupts state. |
+| `management` | ❌ (writes datastore) | ✅ Yes via cluster coordinator | Multiple `management` hosts in the inventory get a coordinator wired automatically — distributed lock + state pub/sub. Choose backend with `openzro_cluster_backend` (see below). |
 
 For **most deployments** (small to medium), the right shape is:
 
@@ -101,20 +110,48 @@ This is what `inventories/production/` is templated for. Single
 (brief outages during upgrades via the rolling-update playbook are
 the only downtime).
 
-For **large deployments** or 24×7 SLAs the management tier needs
-2+ replicas + a cluster coordinator. That work is tracked under
-the HA story below.
+For **HA / 24×7 SLAs**, set 2+ hosts in the `management` group and
+pick a cluster coordinator backend (next section).
+
+## Cluster coordinator (HA management)
+
+When the `management` group has more than one host, the
+coordinator is required so replicas don't corrupt shared state.
+The role auto-defaults to **`embedded`** — no extra deps, fastest
+to stand up. Override via `openzro_cluster_backend` in
+`group_vars/all.yml`:
+
+| `openzro_cluster_backend` | What gets installed | When to use |
+|---|---|---|
+| `none` (auto for single-replica) | Nothing — coordinator is nil | Single `management` host |
+| `embedded` (auto for HA) | Nothing extra — `openzro-mgmt` boots an internal NATS+JetStream server, instances gossip on tcp/6222 | Default for HA. Zero extra deps. JetStream included. |
+| `nats` | Standalone `nats-server` daemon on every management host (via the `openzro_nats_cluster` role) | Operators who want the broker as a separately-monitored process, separate restart cycle, dedicated logs |
+| `redis` | Standalone `redis-server` master/replica across management hosts (via the `openzro_redis_cluster` role) | Teams already running Redis observability tooling |
+
+**Embedded NATS** is the right call 90% of the time. Each
+`openzro-mgmt` process boots a NATS+JetStream server bound to
+loopback, joined to the cluster on a peer port (default 6222).
+The role auto-derives the peer list from the inventory's
+`management` group — no manual config beyond the inventory.
+
+Firewall rule needed: tcp/6222 between management hosts (or the
+port chosen via `openzro_cluster_peer_port`).
+
+For external NATS or Redis (managed brokers, Elasticache /
+Memorystore), set the backend to `nats` or `redis` and configure
+`openzro_cluster_nats_url` / `openzro_cluster_redis_url`. The
+optional install roles only run when you ask the playbook to put
+the broker on the controller hosts themselves.
 
 ## What's NOT here yet
 
-- **HA management** with cluster coordinator. The `production`
-  inventory has the `management` group but the role's
-  `management.json.j2` template doesn't emit a `Cluster:` block
-  yet — adding it (Redis-backed, mirrors the helm chart) is ~6-8h
-  of work + integration testing.
 - **Postgres bootstrap** — assumed managed (RDS / Cloud SQL) or
   manually installed. No `openzro_postgres` role yet.
 - **Backup / restore** for the management datastore.
+- **Sentinel-based automatic failover** for `openzro_redis_cluster`.
+  Today it's master/replica with manual promotion (set
+  `openzro_redis_master_host` to the new master and re-run the
+  playbook). For real HA Redis, use a managed service.
 
 See [openzro/openzro/docs/adr/0008](https://github.com/openzro/openzro/blob/main/docs/adr/0008-k8s-deployment.md)
 for the K8s/helm-chart parallel — the Ansible flow targets the same
