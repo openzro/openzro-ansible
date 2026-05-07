@@ -33,14 +33,14 @@
     state: present
     update_cache: true
   when: ansible_pkg_mgr == "apt"
-  notify: restart openzro
+  notify: Restart openzro
 
 - name: Install openzro client package (dnf/yum)
   ansible.builtin.dnf:
     name: "{{ openzro_routing_peer_package }}{{ ('-' + openzro_version) if openzro_version is defined else '' }}"
     state: present
   when: ansible_pkg_mgr in ["dnf", "yum"]
-  notify: restart openzro
+  notify: Restart openzro
 
 - name: Render systemd EnvironmentFile
   ansible.builtin.template:
@@ -50,7 +50,7 @@
     group: root
     mode: "0640"
     backup: true
-  notify: restart openzro
+  notify: Restart openzro
 
 - name: Enable + start openzro daemon
   ansible.builtin.systemd:
@@ -75,17 +75,17 @@
       {{ openzro_routing_peer_extra_args }}
   changed_when: false
   no_log: true
-  register: openzro_up
+  register: openzro_routing_peer_up
   failed_when:
-    - openzro_up.rc != 0
-    - "'already' not in (openzro_up.stderr | default(''))"
+    - openzro_routing_peer_up.rc != 0
+    - "'already' not in (openzro_routing_peer_up.stderr | default(''))"
 
 - name: Wait for peer to be online (optional)
   ansible.builtin.command:
     cmd: /usr/bin/openzro status
-  register: openzro_status
+  register: openzro_routing_peer_status
   retries: "{{ (openzro_routing_peer_login_timeout_seconds | int) // 5 }}"
   delay: 5
-  until: "'Management: Connected' in openzro_status.stdout"
+  until: "'Management: Connected' in openzro_routing_peer_status.stdout"
   changed_when: false
   when: openzro_routing_peer_wait_for_login

@@ -1,5 +1,5 @@
 ---
-- name: restart openzro
+- name: Restart openzro
   ansible.builtin.systemd:
     name: "{{ openzro_routing_peer_service }}"
     state: restarted

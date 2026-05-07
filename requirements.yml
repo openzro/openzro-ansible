@@ -32,3 +32,9 @@ collections:
   # production where certbot handles cert lifecycle.
   - name: community.crypto
     version: ">=2.0.0"
+
+  # ansible.posix — sysctl module used by openzro_routing_peer
+  # (IPv4 + IPv6 forwarding). Tiny, install for any deployment
+  # that includes routing-peer hosts.
+  - name: ansible.posix
+    version: ">=1.5.0"
