@@ -1,0 +1,91 @@
+---
+- name: Sanity check — required vars
+  ansible.builtin.assert:
+    that:
+      - openzro_routing_peer_setup_key | default('') | length > 0
+      - openzro_management_url | default('') | length > 0
+    fail_msg: >-
+      openzro_routing_peer_setup_key and openzro_management_url are
+      required. Set them in group_vars/<env>/all.yml (vault the
+      setup key) or pass via AWX survey.
+
+- name: Enable IPv4 forwarding (sysctl)
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: "1"
+    state: present
+    sysctl_set: true
+    reload: true
+  when: openzro_routing_peer_enable_ip_forward
+
+- name: Enable IPv6 forwarding (sysctl)
+  ansible.posix.sysctl:
+    name: net.ipv6.conf.all.forwarding
+    value: "1"
+    state: present
+    sysctl_set: true
+    reload: true
+  when: openzro_routing_peer_enable_ip_forward
+
+- name: Install openzro client package (apt)
+  ansible.builtin.apt:
+    name: "{{ openzro_routing_peer_package }}{{ ('=' + openzro_version) if openzro_version is defined else '' }}"
+    state: present
+    update_cache: true
+  when: ansible_pkg_mgr == "apt"
+  notify: restart openzro
+
+- name: Install openzro client package (dnf/yum)
+  ansible.builtin.dnf:
+    name: "{{ openzro_routing_peer_package }}{{ ('-' + openzro_version) if openzro_version is defined else '' }}"
+    state: present
+  when: ansible_pkg_mgr in ["dnf", "yum"]
+  notify: restart openzro
+
+- name: Render systemd EnvironmentFile
+  ansible.builtin.template:
+    src: openzro-routing-peer.env.j2
+    dest: "{{ openzro_routing_peer_env_file }}"
+    owner: root
+    group: root
+    mode: "0640"
+    backup: true
+  notify: restart openzro
+
+- name: Enable + start openzro daemon
+  ansible.builtin.systemd:
+    name: "{{ openzro_routing_peer_service }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# `openzro up` is what actually registers the peer against the
+# management using the setup key — the daemon being up isn't
+# enough. Idempotent: subsequent runs no-op when the peer is
+# already logged in (the CLI returns 0 on "already up"). We hide
+# the setup key from logs (no_log) since the env file lands on
+# disk root-owned but stdout shouldn't echo it.
+- name: Register peer against management (openzro up)
+  ansible.builtin.command:
+    cmd: >-
+      /usr/bin/openzro up
+      --management-url={{ openzro_management_url }}
+      --setup-key={{ openzro_routing_peer_setup_key }}
+      --hostname={{ openzro_routing_peer_hostname }}
+      {{ openzro_routing_peer_extra_args }}
+  changed_when: false
+  no_log: true
+  register: openzro_up
+  failed_when:
+    - openzro_up.rc != 0
+    - "'already' not in (openzro_up.stderr | default(''))"
+
+- name: Wait for peer to be online (optional)
+  ansible.builtin.command:
+    cmd: /usr/bin/openzro status
+  register: openzro_status
+  retries: "{{ (openzro_routing_peer_login_timeout_seconds | int) // 5 }}"
+  delay: 5
+  until: "'Management: Connected' in openzro_status.stdout"
+  changed_when: false
+  when: openzro_routing_peer_wait_for_login

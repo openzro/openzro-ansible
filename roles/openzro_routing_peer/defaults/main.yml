@@ -1,0 +1,46 @@
+---
+# openzro_routing_peer — install the openzro client on a Linux host
+# and bind it to the mesh as a *routing peer* (the peer that other
+# mesh members reach private CIDRs through). The CIDRs themselves
+# are NOT declared here — they're attached to the peer's group at
+# the management side via Network Resources, so the same role can
+# spawn arbitrarily many routing peers and the dashboard / GitOps
+# layer decides which subnets each one exposes.
+#
+# Required vars (must be set per host or in group_vars):
+#   openzro_routing_peer_setup_key   — vault-encrypted reusable key
+#                                      whose auto_groups include the
+#                                      group bound to the network
+#                                      router on the management side
+#   openzro_management_url           — e.g. https://zt.cora.tools
+#
+# Optional vars — see the per-key comments below.
+
+openzro_routing_peer_package: openzro
+openzro_routing_peer_env_file: /etc/default/openzro
+openzro_routing_peer_service: openzro.service
+
+# Hostname the management sees in Peers list. Defaults to the
+# Ansible-discovered hostname so each replica appears distinct in
+# the dashboard. Override per host when you want a stable
+# operator-facing name.
+openzro_routing_peer_hostname: "{{ inventory_hostname_short }}"
+
+# IP forwarding sysctls. Routing peers need both v4 and v6 since
+# CIDRs exposed via Network Resources can be either. Set to false
+# only if some other tool on the box already manages this and you
+# want this role to leave it alone.
+openzro_routing_peer_enable_ip_forward: true
+
+# Optional: extra command-line flags to append to `openzro up`. Most
+# operators do not need this — defaults are correct for a typical
+# routing peer. Useful escape hatch for things like custom DNS
+# servers, alternative interface names, etc.
+openzro_routing_peer_extra_args: ""
+
+# When true, the role waits for the peer to register against the
+# management before completing. Off by default so a slow management
+# pod doesn't block the rest of the playbook; flip on for CI smoke
+# tests where you want to fail fast on a misconfigured setup key.
+openzro_routing_peer_wait_for_login: false
+openzro_routing_peer_login_timeout_seconds: 60

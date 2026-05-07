@@ -75,3 +75,11 @@
       when: openzro_cloud | default('none') == 'aws'
     - role: gcp_lb
       when: openzro_cloud | default('none') == 'gcp'
+
+# Routing peers come last so they have a working management to
+# register against. Empty `routing_peer` group is a valid no-op.
+- name: Routing peers (openzro client + IP forwarding + login)
+  hosts: routing_peer
+  become: true
+  roles:
+    - openzro_routing_peer

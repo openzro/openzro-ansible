@@ -305,3 +305,118 @@ than scaling up).
 - **Cloud LB**: terminate TLS at LB OR pass-through to nginx;
   most operators terminate at LB for ACM/managed cert reasons.
   When passing through, nginx still does the TLS handshake.
+
+## Routing peers (the `routing_peer` group)
+
+Routing peers are Linux hosts whose only job is to expose private
+CIDRs (VPC subnets, on-prem LANs) to the rest of the mesh. They
+run the openzro client, NOT one of the control-plane components.
+The CIDRs they attract are NOT declared in this Ansible repo —
+they're configured on the management side as Network Resources
+hung off the group attached to the routing peer's setup key.
+
+So the responsibility split is:
+
+| Where | What |
+|---|---|
+| **Ansible (this repo)** | Provision the host, install the openzro client, enable IP forwarding, log the peer in with a setup key |
+| **Management (dashboard / API / GitOps)** | Define which CIDRs the peer's group exposes, tie ACL policies, manage peer membership |
+
+This separation means scaling horizontally is purely an inventory
+edit: add a host to the `routing_peer` group, re-run the
+playbook, and the new replica joins the same router pool.
+
+### Variables (group_vars/<env>/all.yml)
+
+```yaml
+openzro_management_url: "https://zt.example.com"
+
+# Reusable, NON-ephemeral setup key whose auto_groups list
+# contains the group bound to the network router on the
+# management side. Vault this.
+openzro_routing_peer_setup_key: !vault |
+  $ANSIBLE_VAULT;1.1;AES256
+  ...
+```
+
+Per-host overrides go in `host_vars/<hostname>.yml` — typical
+case is `openzro_routing_peer_hostname` so the dashboard shows
+something more meaningful than the inventory FQDN.
+
+### Capacity per host
+
+A routing peer is CPU-bound on WireGuard encryption: roughly **1
+vCPU per 1 Gbps of relayed traffic** with modern AES-NI. RAM and
+disk are minimal — 2 GB / 20 GB covers a few thousand
+simultaneous flows. For tighter sizing pick from the table at the
+top of [Recommended infrastructure sizing](#recommended-infrastructure-sizing).
+
+### Sample VM shapes
+
+| Cloud | Up to 1 Gbps / host | Up to 5 Gbps / host |
+|---|---|---|
+| AWS | `t3a.medium` (2 vCPU, 4 GB) | `c6i.xlarge` (4 vCPU, 8 GB) |
+| GCP | `e2-medium` (2 vCPU, 4 GB) | `c3-standard-4` (4 vCPU, 16 GB) |
+| Azure | `B2s` (2 vCPU, 4 GB) | `D4s_v5` (4 vCPU, 16 GB) |
+| Bare metal | 2 cores, 4 GB, 1 GbE | 4 cores, 8 GB, 10 GbE |
+
+Network egress is the real bill driver — locate routing peers in
+the same region as the workloads they front to keep egress
+charges off your invoice.
+
+## AWX / Ansible Tower
+
+This repo is shaped to run as-is from AWX. Reference setup:
+
+### 1. Project
+
+- **SCM type**: `Git`
+- **URL**: your fork of this repo
+- **Branch**: `main`
+- **Update revision on launch**: ✅ (so a job uses the most-recent
+  push without an explicit project sync)
+
+### 2. Inventory
+
+One inventory per environment (`prod`, `staging`, `lab`). Sources:
+
+- **From source control**: point at `inventories/<env>/hosts.yml`,
+  same project as above.
+- **OR cloud-dynamic**: gcp_compute / aws_ec2 plugin scoped by
+  tag (`role=openzro-routing-peer`) — keeps the inventory in
+  lock-step with the actual fleet.
+
+### 3. Credentials
+
+- **Machine**: SSH private key for `ansible_user`
+- **Vault**: the password used to encrypt `all.yml` — AWX will
+  unwrap automatically when the job references vault-encrypted
+  vars
+
+### 4. Job templates
+
+| Name | Playbook | Inventory | Limit | Notes |
+|---|---|---|---|---|
+| `openzro-deploy-control-plane` | `playbooks/site.yml` | prod | (none) | Full stack — first-time bring-up |
+| `openzro-deploy-relays` | `playbooks/relay.yml` | prod | `relay` | Adding/replacing relay tier |
+| `openzro-deploy-routing-peers` | `playbooks/routing_peer.yml` | prod | `routing_peer` | Adding a host or rotating setup keys |
+| `openzro-update` | `playbooks/update.yml` | prod | (none) | Rolling minor-version upgrade |
+
+### 5. Surveys (optional)
+
+Useful when you want operators to launch a job without touching
+git. Example for `openzro-deploy-routing-peers`:
+
+| Survey question | Variable | Default | Required |
+|---|---|---|---|
+| Target hostname (limit) | `target_host` |  | ✅ |
+| openzro version | `openzro_version` | `0.53.1-alpha.41` |  |
+
+The setup key stays in vault — operators don't see or paste it.
+
+### 6. Schedules
+
+- Nightly `openzro-update` against staging at 03:00 UTC catches
+  package-repo regressions before they hit prod.
+- Weekly drift-detection run of `openzro-deploy-control-plane`
+  with `--check --diff` flags surfaces config drift.

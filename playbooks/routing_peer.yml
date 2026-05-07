@@ -1,0 +1,25 @@
+---
+# Deploy openzro routing peers — Linux hosts that expose private
+# CIDRs (VPC subnets, on-prem LANs, etc) into the openzro mesh.
+#
+# Each host needs:
+#   * the openzro client package (from pkg.openzro.io, via `common`)
+#   * IPv4 + IPv6 forwarding enabled
+#   * a vault-encrypted setup key whose auto_groups match the group
+#     bound to the network router on the management side
+#
+# The CIDRs themselves are NOT declared here — they live on the
+# management as Network Resources tied to the routing peer's group,
+# so the same playbook scales horizontally without per-host config.
+
+- name: Common (apt/yum repo + GPG key)
+  hosts: routing_peer
+  become: true
+  roles:
+    - common
+
+- name: Routing peer (openzro client + IP forwarding + login)
+  hosts: routing_peer
+  become: true
+  roles:
+    - openzro_routing_peer

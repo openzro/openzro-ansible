@@ -38,3 +38,16 @@ openzro_cloud: aws   # or gcp
 
 openzro_log_level: "info"
 openzro_version: "0.53.1-alpha.9"
+
+# ── Routing peers ─────────────────────────────────────────────
+# A single setup key shared by every host in the `routing_peer`
+# group is the simplest model: the management knows the group
+# attached to the key, and Network Resources hang off that group.
+# Use a per-region key when you want region-specific CIDRs.
+#
+# Override per-host via host_vars/<host>.yml when one box should
+# attract a different subnet pool than its sibling.
+openzro_management_url: "https://{{ openzro_public_domain }}"
+openzro_routing_peer_setup_key: !vault |
+  $ANSIBLE_VAULT;1.1;AES256
+  REPLACE_WITH_VAULTED_REUSABLE_SETUP_KEY
