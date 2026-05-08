@@ -1,0 +1,60 @@
+---
+# Certbot DNS-01 issuance dispatcher. Called from tasks/main.yml when
+# openzro_relay_cert_provider != "none". Each provider file owns its
+# own pip plugin install, auth setup, and certbot certonly invocation
+# — keeping the per-provider knobs adjacent to where they're used
+# makes the role easier to extend (drop a new provider by adding a
+# tasks/certbot/<name>.yml + a couple defaults).
+
+- name: Sanity — ACME email is required when certbot is enabled
+  ansible.builtin.assert:
+    that:
+      - openzro_relay_acme_email | default('') | length > 0
+      - openzro_relay_public_address | default(openzro_public_domain | default('')) | length > 0
+    fail_msg: >-
+      openzro_relay_cert_provider={{ openzro_relay_cert_provider }} requires
+      openzro_relay_acme_email and openzro_relay_public_address (or
+      openzro_public_domain as fallback) to be set.
+
+- name: Compute cert lineage path for the relay's public address
+  ansible.builtin.set_fact:
+    _openzro_relay_cert_lineage: "/etc/letsencrypt/live/{{ openzro_relay_public_address | default(openzro_public_domain) }}"
+
+- name: Check whether a cert already exists for this lineage
+  ansible.builtin.stat:
+    path: "{{ _openzro_relay_cert_lineage }}/cert.pem"
+  register: _openzro_relay_cert_stat
+
+- name: Install certbot + provider DNS plugin
+  ansible.builtin.import_tasks: install.yml
+
+- name: Issue / renew cert (Cloud DNS / Google)
+  ansible.builtin.import_tasks: google.yml
+  when: openzro_relay_cert_provider == "certbot_dns_google"
+
+- name: Issue / renew cert (Route53 / AWS)
+  ansible.builtin.import_tasks: route53.yml
+  when: openzro_relay_cert_provider == "certbot_dns_route53"
+
+- name: Issue / renew cert (Cloudflare)
+  ansible.builtin.import_tasks: cloudflare.yml
+  when: openzro_relay_cert_provider == "certbot_dns_cloudflare"
+
+# certbot ships its own renewal timer; we only need to make sure it's
+# running. The unit name differs per distro — try both with
+# failed_when: false so the wrong-distro task is a no-op.
+- name: Ensure certbot renewal timer is enabled (Debian path)
+  ansible.builtin.systemd:
+    name: certbot.timer
+    enabled: true
+    state: started
+  failed_when: false
+  when: ansible_pkg_mgr == "apt"
+
+- name: Ensure certbot renewal timer is enabled (RHEL path)
+  ansible.builtin.systemd:
+    name: certbot-renew.timer
+    enabled: true
+    state: started
+  failed_when: false
+  when: ansible_pkg_mgr in ["dnf", "yum"]

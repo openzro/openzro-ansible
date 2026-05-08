@@ -1,0 +1,39 @@
+---
+# certbot DNS-01 via Cloudflare plugin.
+#
+# Auth: API token with Zone:DNS:Edit scoped to the zone(s) covering
+# openzro_relay_public_address. Generate at
+# https://dash.cloudflare.com/profile/api-tokens — DON'T use the
+# legacy "Global API Key" (that's a primary credential with full
+# account access; the scoped token is what we want).
+#
+# The plugin requires a credentials file (it doesn't read env vars
+# unlike route53). We render it at /etc/letsencrypt/cloudflare.ini
+# with mode 0600 — only root can read; certbot runs as root so this
+# is fine. The deploy-hook's chgrp doesn't widen this file (cloudflare.ini
+# isn't under /etc/letsencrypt/{archive,live}).
+
+- name: Render Cloudflare credentials file
+  ansible.builtin.copy:
+    dest: /etc/letsencrypt/cloudflare.ini
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      # Rendered by openzro-ansible — do not edit by hand.
+      dns_cloudflare_api_token = {{ openzro_relay_certbot_dns_cloudflare_api_token }}
+  no_log: true
+
+- name: Issue / renew cert via DNS-01 (Cloudflare)
+  ansible.builtin.command:
+    cmd: >-
+      certbot certonly --non-interactive --agree-tos --expand
+      --email {{ openzro_relay_acme_email }}
+      --dns-cloudflare
+      --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini
+      --dns-cloudflare-propagation-seconds {{ openzro_relay_certbot_dns_propagation_seconds | default(10) }}
+      -d {{ openzro_relay_public_address }}{% if openzro_relay_cluster_headless | default('') | length > 0 %} -d {{ openzro_relay_cluster_headless }}{% endif %}
+  when:
+    - not _openzro_relay_cert_stat.stat.exists or openzro_relay_certbot_force_renew
+  changed_when: true
+  notify: Restart openzro-relay

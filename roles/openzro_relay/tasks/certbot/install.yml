@@ -1,0 +1,71 @@
+---
+# Install certbot + the provider's DNS plugin. Two distinct paths:
+#
+# - Debian/Ubuntu: distro packages everything (certbot,
+#   python3-certbot-dns-<provider>) into the same Python env, so apt
+#   alone is enough.
+#
+# - Rocky/RHEL/AlmaLinux: EPEL ships certbot but its Python isolation
+#   doesn't match pip3's default install dir, so a separately-pip'd
+#   plugin never gets discovered by the EPEL certbot binary (symptom:
+#   `certbot: error: unrecognized arguments: --dns-<provider>-...`).
+#   Workaround: certbot + plugin both go into a /opt/certbot venv,
+#   and we symlink /usr/bin/certbot to the venv binary so the system
+#   PATH (and the certbot-renew.timer's ExecStart) sees it. The EPEL
+#   `certbot` RPM is still installed for the renewal timer unit file
+#   it ships at /usr/lib/systemd/system/certbot-renew.timer — the
+#   binary it provides gets shadowed by the venv symlink.
+
+- name: Derive provider plugin package names from cert provider key
+  ansible.builtin.set_fact:
+    _openzro_relay_openzro_relay_certbot_plugin_pip: "{{ openzro_relay_cert_provider | regex_replace('^certbot_dns_(.+)$', 'certbot-dns-\\1') }}"
+    _openzro_relay_openzro_relay_certbot_plugin_apt: "{{ openzro_relay_cert_provider | regex_replace('^certbot_dns_(.+)$', 'python3-certbot-dns-\\1') }}"
+
+- name: Install certbot + provider plugin (apt)
+  ansible.builtin.apt:
+    name:
+      - certbot
+      - "{{ _openzro_relay_certbot_plugin_apt }}"
+    state: present
+    update_cache: true
+  when: ansible_pkg_mgr == "apt"
+
+- name: Install python venv prereqs + EPEL certbot (dnf)
+  ansible.builtin.dnf:
+    name:
+      - python3
+      - python3-pip
+      - augeas-libs
+      - certbot
+    state: present
+    update_cache: true
+  when: ansible_pkg_mgr in ["dnf", "yum"]
+
+- name: Create certbot venv (RHEL family only)
+  ansible.builtin.command:
+    cmd: python3 -m venv /opt/certbot
+    creates: /opt/certbot/bin/activate
+  when: ansible_pkg_mgr in ["dnf", "yum"]
+
+# `state: latest` is intentional: the EPEL `certbot` RPM (whose
+# binary we shadow via the symlink below) lags upstream by enough
+# that recent DNS plugins reject its CLI arg list, and operators
+# expect new EFF cert+plugin behaviour to land on `--tags certbot`
+# reruns without manual version bumps to this role.
+- name: Install certbot + provider plugin into venv (RHEL family)
+  ansible.builtin.pip:
+    name:
+      - pip
+      - certbot
+      - "{{ _openzro_relay_certbot_plugin_pip }}"
+    state: latest  # noqa package-latest
+    virtualenv: /opt/certbot
+  when: ansible_pkg_mgr in ["dnf", "yum"]
+
+- name: Symlink venv certbot to /usr/bin (RHEL family)
+  ansible.builtin.file:
+    src: /opt/certbot/bin/certbot
+    dest: /usr/bin/certbot
+    state: link
+    force: true
+  when: ansible_pkg_mgr in ["dnf", "yum"]

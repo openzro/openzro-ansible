@@ -30,4 +30,72 @@ openzro_relay_group: openzro
 # Leave at false when the relay reads its cert from somewhere other
 # than /etc/letsencrypt/live/ — the role won't generate the hook
 # script and won't touch the LE tree.
+#
+# Note: when openzro_relay_cert_provider != "none" (the role issues
+# the cert itself via certbot), the deploy-hook is installed
+# unconditionally — the toggle here only matters for operators who
+# stage certbot from outside this role.
 openzro_relay_certbot_renew_hook: false
+
+# ---------------------------------------------------------------
+# Certbot DNS-01 issuance pipeline (optional)
+#
+# When set to a `certbot_dns_*` value, the role installs certbot +
+# the matching DNS plugin and issues a TLS cert for the relay's
+# public address via Let's Encrypt's DNS-01 challenge. The deploy-hook
+# above is wired automatically so renewals don't strand the daemon
+# on a stale privkey.
+#
+# Default `none` preserves the pre-existing role behaviour: the
+# operator brings their own cert (LB-terminated, manually staged,
+# external certbot run, etc) and this role only manages the relay
+# binary itself.
+#
+# Choices:
+#   none                    — role issues no cert (default)
+#   certbot_dns_google      — Cloud DNS, GCE metadata or service-account auth
+#   certbot_dns_route53     — Route53, IAM role or static access keys
+#   certbot_dns_cloudflare  — Cloudflare, API token (Zone:DNS:Edit scope)
+# ---------------------------------------------------------------
+openzro_relay_cert_provider: none
+
+# ACME registration email — required when openzro_relay_cert_provider
+# is a certbot_dns_* value. Let's Encrypt sends renewal warnings here.
+openzro_relay_acme_email: ""
+
+# Optional second SAN. When the relay is behind a multi-relay cluster
+# headless DNS name (round-robin between several pods, see ADR-0014
+# in openzro/openzro), the cert needs both the per-host name (above
+# as openzro_relay_public_address) AND the cluster name as SANs so
+# peers connecting via either name complete TLS validation.
+openzro_relay_cluster_headless: ""
+
+# Force re-issuance even when a cert already exists for this lineage.
+# Useful when rotating SAN lists or rebuilding a host. Reset to false
+# after the one-shot renewal completes.
+openzro_relay_certbot_force_renew: false
+
+# --- Provider-specific knobs (only consulted when the matching
+#     openzro_relay_cert_provider is selected) ---
+
+# certbot_dns_google
+# When the Cloud DNS zone lives in a different GCP project than the
+# VM running the relay, set this to the zone's project ID. Empty
+# means "use the VM's metadata project" (correct when zone + VM
+# share a project).
+openzro_relay_certbot_dns_google_project: ""
+
+# certbot_dns_route53
+# AWS access key for the IAM principal that can write to the zone's
+# `_acme-challenge` records. Leave both empty when the relay runs
+# on EC2 with an instance role attached (the AWS SDK falls back to
+# IMDS automatically). Vault these when set.
+openzro_relay_certbot_dns_route53_access_key_id: ""
+openzro_relay_certbot_dns_route53_secret_access_key: ""
+openzro_relay_certbot_dns_route53_region: "us-east-1"
+
+# certbot_dns_cloudflare
+# Cloudflare API token — must be vaulted. Needs Zone:DNS:Edit
+# permission scoped to the zone(s) covering openzro_relay_public_address.
+# Written to /etc/letsencrypt/cloudflare.ini at mode 0600.
+openzro_relay_certbot_dns_cloudflare_api_token: ""

@@ -1,0 +1,39 @@
+---
+# certbot DNS-01 via AWS Route53 plugin.
+#
+# Auth: two paths.
+#
+#   1. Instance role (recommended on EC2). Leave both
+#      openzro_relay_certbot_dns_route53_access_key_id and
+#      _secret_access_key empty; the AWS SDK falls back to IMDS and
+#      assumes the role attached to the instance.
+#
+#   2. Static access keys (off-AWS or when the relay can't be given
+#      a role). Set both vars from a vault — they get exported as
+#      AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY only for the
+#      certbot invocation, never written to disk.
+#
+# IAM permissions required: route53:ChangeResourceRecordSets and
+# route53:GetChange on the hosted zone covering openzro_relay_public_address,
+# plus route53:ListHostedZones project-wide so the plugin can locate
+# the zone (a wildcard "*" Resource works fine for a tightly-scoped
+# IAM principal).
+
+- name: Issue / renew cert via DNS-01 (Route53 / AWS)
+  ansible.builtin.command:
+    cmd: >-
+      certbot certonly --non-interactive --agree-tos --expand
+      --email {{ openzro_relay_acme_email }}
+      --dns-route53
+      --dns-route53-propagation-seconds {{ openzro_relay_certbot_dns_propagation_seconds | default(30) }}
+      -d {{ openzro_relay_public_address }}{% if openzro_relay_cluster_headless | default('') | length > 0 %} -d {{ openzro_relay_cluster_headless }}{% endif %}
+  environment:
+    # Empty values = SDK falls back to IMDS / instance role.
+    AWS_ACCESS_KEY_ID: "{{ openzro_relay_certbot_dns_route53_access_key_id | default('') }}"
+    AWS_SECRET_ACCESS_KEY: "{{ openzro_relay_certbot_dns_route53_secret_access_key | default('') }}"
+    AWS_DEFAULT_REGION: "{{ openzro_relay_certbot_dns_route53_region | default('us-east-1') }}"
+  no_log: "{{ openzro_relay_certbot_dns_route53_secret_access_key | default('') | length > 0 }}"
+  when:
+    - not _openzro_relay_cert_stat.stat.exists or openzro_relay_certbot_force_renew
+  changed_when: true
+  notify: Restart openzro-relay

@@ -1,0 +1,30 @@
+---
+# certbot DNS-01 via Google Cloud DNS plugin.
+#
+# Auth: GCE metadata. The plugin calls `google.auth.default()` which
+# falls back to the VM's instance service account when no credentials
+# file is on disk — IAM-managed, no key file. The service account
+# must hold roles/dns.admin on the zone (or a custom role with the
+# changes.create + changes.get + managedZones.list permissions).
+#
+# Cross-project zones: when the zone lives in a different GCP project
+# than the VM, set openzro_relay_certbot_dns_google_project to the
+# zone's project ID. Without it, google.auth.default() picks the VM's
+# metadata project and `managedZones.list` returns 403 (the error
+# stringifies as "permission denied" but is really wrong-project).
+
+- name: Issue / renew cert via DNS-01 (Cloud DNS / Google)
+  ansible.builtin.command:
+    cmd: >-
+      certbot certonly --non-interactive --agree-tos --expand
+      --email {{ openzro_relay_acme_email }}
+      --dns-google
+      --dns-google-propagation-seconds {{ openzro_relay_certbot_dns_propagation_seconds | default(60) }}
+      -d {{ openzro_relay_public_address }}{% if openzro_relay_cluster_headless | default('') | length > 0 %} -d {{ openzro_relay_cluster_headless }}{% endif %}
+  environment:
+    # Empty value = no override, plugin uses VM metadata project.
+    GOOGLE_CLOUD_PROJECT: "{{ openzro_relay_certbot_dns_google_project | default('') }}"
+  when:
+    - not _openzro_relay_cert_stat.stat.exists or openzro_relay_certbot_force_renew
+  changed_when: true
+  notify: Restart openzro-relay

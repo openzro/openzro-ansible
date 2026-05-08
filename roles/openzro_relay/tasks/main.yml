@@ -5,7 +5,7 @@
     state: present
     update_cache: true
   when: ansible_pkg_mgr == "apt"
-  notify: restart openzro-relay
+  notify: Restart openzro-relay
 
 - name: Install openzro-relay package (dnf/yum)
   ansible.builtin.dnf:
@@ -13,7 +13,7 @@
     state: present
     update_cache: true
   when: ansible_pkg_mgr in ["dnf", "yum"]
-  notify: restart openzro-relay
+  notify: Restart openzro-relay
 
 - name: Render systemd EnvironmentFile
   ansible.builtin.template:
@@ -23,7 +23,7 @@
     group: openzro
     mode: "0640"
     backup: true
-  notify: restart openzro-relay
+  notify: Restart openzro-relay
 
 - name: Enable + start openzro-relay
   ansible.builtin.systemd:
@@ -33,12 +33,32 @@
     daemon_reload: true
 
 # ---------------------------------------------------------------
-# Optional: certbot renewal deploy-hook + initial cert tree open.
-# Gated on openzro_relay_certbot_renew_hook (default false) so
-# operators who don't issue their cert via Let's Encrypt aren't
-# affected. The hook works with ANY certbot path (DNS-01, HTTP-01,
-# any plugin) since it only reacts to RENEWED_LINEAGE matching our
-# public address.
+# Optional: issue TLS cert for the relay's public address via Let's
+# Encrypt's DNS-01 challenge using one of the supported providers.
+# Default `none` skips this entirely — operators terminate TLS
+# upstream (LB, nginx) or stage a non-LE cert manually.
+# ---------------------------------------------------------------
+
+- name: Issue / renew TLS cert via certbot DNS-01
+  ansible.builtin.import_tasks: certbot/main.yml
+  when: openzro_relay_cert_provider != "none"
+
+# ---------------------------------------------------------------
+# certbot renewal deploy-hook + initial cert tree open.
+#
+# The hook fires regardless of who issued the cert (this role's
+# certbot pipeline OR an external certbot run) — it only reacts
+# to RENEWED_LINEAGE matching openzro_relay_public_address. Two
+# triggers run it:
+#
+# - openzro_relay_certbot_renew_hook == true (explicit opt-in for
+#   operators who issue certs OUTSIDE this role).
+# - openzro_relay_cert_provider != "none" (the role issues the
+#   cert itself; renewal handling is implied).
+#
+# The shell task below reapplies the same chgrp/chmod the hook
+# does — needed for the pre-first-renewal window where certbot
+# just issued the cert and the relay needs to read it now.
 # ---------------------------------------------------------------
 
 - name: Ensure certbot deploy-hook directory exists
@@ -48,7 +68,7 @@
     owner: root
     group: root
     mode: "0755"
-  when: openzro_relay_certbot_renew_hook
+  when: openzro_relay_certbot_renew_hook or openzro_relay_cert_provider != "none"
 
 - name: Render certbot deploy-hook for openzro-relay
   ansible.builtin.template:
@@ -57,7 +77,7 @@
     owner: root
     group: root
     mode: "0755"
-  when: openzro_relay_certbot_renew_hook
+  when: openzro_relay_certbot_renew_hook or openzro_relay_cert_provider != "none"
 
 # ACL on /etc/letsencrypt was unreliable — privkey1.pem under
 # /etc/letsencrypt/archive/<domain>/ stays mode 0600 root:root no
@@ -74,4 +94,4 @@
     find /etc/letsencrypt/archive /etc/letsencrypt/live -type d -exec chmod 0750 {} +
     find /etc/letsencrypt/archive /etc/letsencrypt/live -type f -exec chmod 0640 {} +
   changed_when: false
-  when: openzro_relay_certbot_renew_hook
+  when: openzro_relay_certbot_renew_hook or openzro_relay_cert_provider != "none"

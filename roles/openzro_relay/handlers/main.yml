@@ -1,5 +1,5 @@
 ---
-- name: restart openzro-relay
+- name: Restart openzro-relay
   ansible.builtin.systemd:
     name: "{{ openzro_relay_service }}"
     state: restarted
