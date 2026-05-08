@@ -26,7 +26,7 @@
 
   pre_tasks:
     - name: Drain from cloud LB (AWS)
-      ansible.builtin.include_role:
+      ansible.builtin.import_role:
         name: aws_lb
         tasks_from: drain.yml
       delegate_to: localhost
@@ -38,7 +38,7 @@
         - aws_instance_id is defined
 
     - name: Drain from cloud LB (GCP)
-      ansible.builtin.include_role:
+      ansible.builtin.import_role:
         name: gcp_lb
         tasks_from: drain.yml
       delegate_to: localhost
@@ -82,7 +82,7 @@
       when: "'dashboard' in group_names"
 
     - name: Re-add to cloud LB (AWS)
-      ansible.builtin.include_role:
+      ansible.builtin.import_role:
         name: aws_lb
         tasks_from: undrain.yml
       delegate_to: localhost
@@ -94,7 +94,7 @@
         - aws_instance_id is defined
 
     - name: Re-add to cloud LB (GCP)
-      ansible.builtin.include_role:
+      ansible.builtin.import_role:
         name: gcp_lb
         tasks_from: undrain.yml
       delegate_to: localhost
@@ -117,7 +117,7 @@
 
   pre_tasks:
     - name: Drain relay from NLB (AWS)
-      ansible.builtin.include_role:
+      ansible.builtin.import_role:
         name: aws_lb
         tasks_from: drain.yml
       delegate_to: localhost
@@ -129,7 +129,7 @@
         - aws_instance_id is defined
 
     - name: Drain relay from Network LB (GCP)
-      ansible.builtin.include_role:
+      ansible.builtin.import_role:
         name: gcp_lb
         tasks_from: drain.yml
       delegate_to: localhost
@@ -152,7 +152,7 @@
         timeout: 60
 
     - name: Re-add relay to NLB (AWS)
-      ansible.builtin.include_role:
+      ansible.builtin.import_role:
         name: aws_lb
         tasks_from: undrain.yml
       delegate_to: localhost
@@ -164,7 +164,7 @@
         - aws_instance_id is defined
 
     - name: Re-add relay to Network LB (GCP)
-      ansible.builtin.include_role:
+      ansible.builtin.import_role:
         name: gcp_lb
         tasks_from: undrain.yml
       delegate_to: localhost

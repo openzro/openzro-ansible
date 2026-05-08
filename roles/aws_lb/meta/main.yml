@@ -1,11 +1,9 @@
 ---
-# Required Ansible collections — install via:
-#   ansible-galaxy install -r requirements.yml
-collections:
-  - name: community.aws
-    version: ">=7.0.0"
-  - name: amazon.aws
-    version: ">=7.0.0"
+# Collection deps live in /requirements.yml (ansible-galaxy install
+# -r requirements.yml). The `collections:` key in meta/main.yml only
+# accepts strings (not the dict-with-version form Galaxy uses), so
+# duplicating them here is both a schema violation and a maintenance
+# trap — dropped intentionally.
 
 galaxy_info:
   author: openZro

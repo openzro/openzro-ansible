@@ -1,0 +1,83 @@
+name: Lint
+
+# Floor of CI: runs ansible-lint at the basic profile and a smoke
+# `--syntax-check` against an "include every non-cloud role" playbook.
+# Catches the bulk of mechanical problems (typos in vars, broken
+# jinja, unknown modules, indent regressions) without needing real
+# cloud credentials in CI.
+#
+# A more thorough Molecule-based test matrix (idempotency runs in
+# Debian + Rocky containers, per-provider certbot scenarios) is a
+# follow-up — too heavy for the always-on lint gate.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: ansible-lint + syntax check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install ansible-core + ansible-lint
+        run: |
+          python -m pip install --upgrade pip
+          pip install "ansible-core>=2.16,<3.0" "ansible-lint>=24.0"
+
+      - name: Install Ansible collections (non-cloud)
+        # Cloud-heavy collections (amazon.aws, google.cloud) are
+        # listed in requirements.yml but skipped here — they pull
+        # large transitive deps and the cloud LB roles are still
+        # scanned by ansible-lint per-file regardless.
+        run: |
+          ansible-galaxy collection install \
+            ansible.posix \
+            community.general \
+            community.crypto
+
+      - name: Run ansible-lint (basic profile, see .ansible-lint)
+        # Path arguments are explicit because `ansible-lint .` only
+        # walks top-level YAML by default — it doesn't auto-descend
+        # into roles/ or playbooks/ in this repo's layout.
+        run: ansible-lint roles/ playbooks/
+
+      - name: Render smoke playbook (every non-cloud role)
+        run: |
+          cat > /tmp/smoke.yml <<'EOF'
+          ---
+          # Smoke playbook for CI. Includes every non-cloud role so
+          # `--syntax-check` exercises cross-role var interactions
+          # (something ansible-lint per-file doesn't catch). Cloud
+          # LB roles (aws_lb, gcp_lb) are excluded because their
+          # collections aren't installed in this job; they're covered
+          # by ansible-lint per-role above.
+          - hosts: localhost
+            gather_facts: false
+            roles:
+              - common
+              - openzro_management
+              - openzro_signal
+              - openzro_relay
+              - openzro_routing_peer
+              - openzro_dashboard
+              - openzro_nginx
+              - openzro_nats_cluster
+              - openzro_redis_cluster
+          EOF
+
+      - name: Syntax-check smoke playbook
+        env:
+          ANSIBLE_ROLES_PATH: ${{ github.workspace }}/roles
+        run: ansible-playbook --syntax-check /tmp/smoke.yml

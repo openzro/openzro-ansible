@@ -1,0 +1,58 @@
+---
+# ansible-lint configuration for the openzro-ansible repo.
+#
+# Profile: `basic` — catches structural issues (bad jinja, missing
+# handlers, unknown modules, schema violations) plus the most common
+# style problems. Tightening to `production` is tracked as a follow-up
+# (see `skip_list` below).
+
+profile: basic
+
+skip_list:
+  # Several roles still expose vars without the full role-name prefix,
+  # most notably openzro_redis_cluster's `openzro_redis_password` /
+  # `openzro_redis_master_host` (should be `openzro_redis_cluster_*`).
+  # These are public-API names that operators reference from their
+  # inventories — renaming them needs deprecation aliases + a transition
+  # window. Skipped here to avoid a false-positive gate; track the
+  # cleanup separately.
+  - var-naming[no-role-prefix]
+
+  # A couple of role handlers ship with lowercase names that predate
+  # ansible-lint's `name[casing]` rule (e.g. `restart redis`,
+  # `restart openzro-relay`, `restart openzro-signal`). Removing this
+  # entry is gated on those handlers being renamed + their `notify:`
+  # references updated — small but cross-role mechanical fix; track
+  # in a separate PR so this CI workflow can land first.
+  - name[casing]
+
+  # `update.yml` uses column-aligned `when:` clauses on the role list
+  # (the spaces after each comma make `'management'` / `'signal'` /
+  # `'dashboard'` line up vertically). Lint flags this as
+  # `yaml[commas]: Too many spaces after comma`. The alignment is
+  # intentional — improves readability of a 6-row role table — and
+  # reformatting to single-spaced is a regression in human terms.
+  - yaml[commas]
+
+  # ansible-lint enforces `name → when → block` task-key ordering at
+  # basic+. A handful of older tasks in openzro_nats_cluster put
+  # `name → when → notify → block`. Functionally equivalent; reordering
+  # is mechanical but the diff churn isn't worth it before a real
+  # restructuring pass on the role.
+  - key-order[task]
+
+  # The openzro_nginx role uses `shell: systemctl list-unit-files` +
+  # awk to figure out which certbot renewal timer name the distro
+  # ships (`certbot.timer` on Debian/Ubuntu, `certbot-renew.timer` on
+  # RHEL/Rocky). The systemd module has no equivalent listing
+  # operation, so shell is the right tool here. Skipped globally
+  # rather than per-task because the alternative (per-task `# noqa`)
+  # bloats the task body for a documented, deliberate choice.
+  - command-instead-of-module
+
+# Lint everything under the standard role/playbook tree. Fixtures
+# under tests/ are explicitly NOT excluded — they should be valid
+# Ansible too.
+exclude_paths:
+  - .github/
+  - .git/
