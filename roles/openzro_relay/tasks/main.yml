@@ -31,3 +31,47 @@
     enabled: true
     state: started
     daemon_reload: true
+
+# ---------------------------------------------------------------
+# Optional: certbot renewal deploy-hook + initial cert tree open.
+# Gated on openzro_relay_certbot_renew_hook (default false) so
+# operators who don't issue their cert via Let's Encrypt aren't
+# affected. The hook works with ANY certbot path (DNS-01, HTTP-01,
+# any plugin) since it only reacts to RENEWED_LINEAGE matching our
+# public address.
+# ---------------------------------------------------------------
+
+- name: Ensure certbot deploy-hook directory exists
+  ansible.builtin.file:
+    path: /etc/letsencrypt/renewal-hooks/deploy
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: openzro_relay_certbot_renew_hook
+
+- name: Render certbot deploy-hook for openzro-relay
+  ansible.builtin.template:
+    src: openzro-relay-renew.sh.j2
+    dest: /etc/letsencrypt/renewal-hooks/deploy/openzro-relay.sh
+    owner: root
+    group: root
+    mode: "0755"
+  when: openzro_relay_certbot_renew_hook
+
+# ACL on /etc/letsencrypt was unreliable — privkey1.pem under
+# /etc/letsencrypt/archive/<domain>/ stays mode 0600 root:root no
+# matter what setfacl -R does because certbot recreates it on every
+# renewal. Going direct: chgrp the cert tree to the relay group and
+# chmod g+r on files. Idempotent (find -exec is a no-op when bits
+# are already set) and matches what the deploy-hook re-applies after
+# every renewal — running both keeps the daemon readable in the
+# pre-first-renewal window too.
+- name: Open Let's Encrypt cert tree for the relay group to read
+  ansible.builtin.shell: |
+    set -euo pipefail
+    chgrp -R {{ openzro_relay_group }} /etc/letsencrypt/archive /etc/letsencrypt/live
+    find /etc/letsencrypt/archive /etc/letsencrypt/live -type d -exec chmod 0750 {} +
+    find /etc/letsencrypt/archive /etc/letsencrypt/live -type f -exec chmod 0640 {} +
+  changed_when: false
+  when: openzro_relay_certbot_renew_hook

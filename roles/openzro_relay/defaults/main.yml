@@ -9,3 +9,25 @@ openzro_relay_listen_address: "0.0.0.0:33080"
 # Externally-resolvable address peers connect to. Falls back to
 # the public domain if a relay-specific name isn't given.
 openzro_relay_exposed_address: "rel://{{ openzro_relay_public_address | default(openzro_public_domain) }}:{{ openzro_relay_port | default(33080) }}"
+
+# Posix group the relay process runs as. The openzro-relay package's
+# post_install lands the daemon in `openzro` (shared with the client
+# daemon's group) — override here only if you've repackaged with a
+# different group.
+openzro_relay_group: openzro
+
+# Opt-in: when true, the role assumes a Let's Encrypt cert is in
+# use for openzro_relay_public_address (issued by ANY certbot path —
+# DNS-01 with google/route53/cloudflare, HTTP-01, or operator-driven
+# certbot calls outside this role) and installs a deploy-hook that:
+#
+#   1. opens /etc/letsencrypt/{archive,live} for openzro_relay_group
+#      to read (certbot creates new privkeyN.pem at mode 0600 on
+#      every renewal, so a one-shot chmod isn't enough);
+#   2. reload-or-restarts openzro-relay so the daemon picks up the
+#      rotated cert without a manual bounce.
+#
+# Leave at false when the relay reads its cert from somewhere other
+# than /etc/letsencrypt/live/ — the role won't generate the hook
+# script and won't touch the LE tree.
+openzro_relay_certbot_renew_hook: false

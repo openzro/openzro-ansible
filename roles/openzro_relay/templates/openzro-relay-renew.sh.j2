@@ -1,0 +1,41 @@
+#!/bin/bash
+{# Rendered by openzro-ansible — do not edit by hand. #}
+#
+# certbot renewal deploy-hook for openzro-relay.
+#
+# Lives at /etc/letsencrypt/renewal-hooks/deploy/openzro-relay.sh
+# and is invoked by certbot AFTER a successful renewal of any
+# lineage on this host. RENEWED_LINEAGE points at the cert
+# directory that just rotated (e.g.
+# /etc/letsencrypt/live/relay.example.com).
+#
+# We only act when the renewal hit OUR cert — other lineages the
+# host might issue (mgmt panels, monitoring sidecars, etc) shouldn't
+# trigger a relay bounce.
+#
+# certbot creates new archive files (privkey2.pem, privkey3.pem, …)
+# at mode 0600 on every rotation, even when the prior privkey1.pem
+# was opened to a group. Re-apply the group-read posture here, then
+# reload-or-restart so the relay re-reads the rotated cert.
+
+set -euo pipefail
+
+OUR_LINEAGE="/etc/letsencrypt/live/{{ openzro_relay_public_address | default(openzro_public_domain) }}"
+RELAY_GROUP="{{ openzro_relay_group }}"
+
+# Only act when THIS deploy-hook fired for our cert.
+if [ "${RENEWED_LINEAGE:-}" != "$OUR_LINEAGE" ]; then
+    exit 0
+fi
+
+# Re-open archive + live for the relay group.
+chgrp -R "$RELAY_GROUP" /etc/letsencrypt/archive /etc/letsencrypt/live
+find /etc/letsencrypt/archive /etc/letsencrypt/live -type d -exec chmod 0750 {} +
+find /etc/letsencrypt/archive /etc/letsencrypt/live -type f -exec chmod 0640 {} +
+
+# reload-or-restart picks reload if the unit defines ExecReload,
+# else falls through to a full restart. Either way the relay
+# re-reads the cert files at process start.
+systemctl reload-or-restart {{ openzro_relay_service }}
+
+echo "openzro-relay restarted after cert renewal: $RENEWED_LINEAGE"
