@@ -8,7 +8,7 @@
 
 - name: Install openzro-dashboard package (apt)
   ansible.builtin.apt:
-    name: "{{ openzro_dashboard_package }}{{ ('=' + openzro_version) if openzro_version is defined else '' }}"
+    name: "{{ openzro_dashboard_package }}{{ ('=' + openzro_version) if openzro_version | default('') | length > 0 else '' }}"
     state: present
     update_cache: true
   when: ansible_pkg_mgr == "apt"
@@ -16,8 +16,9 @@
 
 - name: Install openzro-dashboard package (dnf/yum)
   ansible.builtin.dnf:
-    name: "{{ openzro_dashboard_package }}{{ ('-' + openzro_version) if openzro_version is defined else '' }}"
+    name: "{{ openzro_dashboard_package }}{{ ('-' + openzro_version) if openzro_version | default('') | length > 0 else '' }}"
     state: present
+    update_cache: true
   when: ansible_pkg_mgr in ["dnf", "yum"]
   register: dashboard_pkg_dnf
 

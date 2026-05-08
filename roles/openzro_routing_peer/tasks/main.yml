@@ -29,7 +29,7 @@
 
 - name: Install openzro client package (apt)
   ansible.builtin.apt:
-    name: "{{ openzro_routing_peer_package }}{{ ('=' + openzro_version) if openzro_version is defined else '' }}"
+    name: "{{ openzro_routing_peer_package }}{{ ('=' + openzro_version) if openzro_version | default('') | length > 0 else '' }}"
     state: present
     update_cache: true
   when: ansible_pkg_mgr == "apt"
@@ -37,8 +37,9 @@
 
 - name: Install openzro client package (dnf/yum)
   ansible.builtin.dnf:
-    name: "{{ openzro_routing_peer_package }}{{ ('-' + openzro_version) if openzro_version is defined else '' }}"
+    name: "{{ openzro_routing_peer_package }}{{ ('-' + openzro_version) if openzro_version | default('') | length > 0 else '' }}"
     state: present
+    update_cache: true
   when: ansible_pkg_mgr in ["dnf", "yum"]
   notify: Restart openzro
 
