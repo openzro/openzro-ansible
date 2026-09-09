@@ -199,7 +199,10 @@ base repos, so `common` installs `epel-release` on EL (not on Fedora —
 its repos carry current versions of both). On Rocky / Alma / CentOS
 Stream this resolves from `extras`; on RHEL proper, either enable EPEL
 per Red Hat's documentation first or point
-`openzro_epel_release_package` at the release RPM's URL.
+`openzro_epel_release_package` at the release RPM's URL. Set
+`openzro_enable_epel: false` where policy forbids third-party repos on
+the host -- certbot then has to come from somewhere you provide, or
+`openzro_relay_cert_provider` has to be something other than certbot.
 
 Note also that EPEL's certbot lags upstream far enough that recent DNS
 plugins can reject its CLI arguments. The `openzro_relay` role works
@@ -212,12 +215,36 @@ Fedora needs none of that.
 the licence change. `openzro_redis_cluster` selects package, service,
 user and config path accordingly; the coordinator speaks the Redis
 protocol, so valkey is a drop-in. EL uses `redis` from AppStream,
-Debian `redis-server`.
+Debian `redis-server`. Override `openzro_redis_flavour` when you're
+running a build that doesn't match the distro default -- valkey from a
+third-party repo on EL, say; package, service, user and config path
+all follow from it.
 
 **NATS.** Synadia publishes an apt repo but no rpm one, so RHEL-family
 hosts get the upstream release tarball into `/usr/local/bin` (version
 and optional checksum in `openzro_nats_version` /
 `openzro_nats_checksum`).
+
+## Internal mirrors and air-gapped installs
+
+The roles fetch packages and the signing key from `pkg.openzro.io`.
+Where that host is unreachable -- an air-gapped network, or a policy
+that requires an internal mirror -- point them elsewhere:
+
+```yaml
+openzro_repo_baseurl_apt: "https://mirror.internal/openzro/apt"
+openzro_repo_baseurl_rpm: "https://mirror.internal/openzro/rpm/$basearch"
+openzro_repo_key_url:     "https://mirror.internal/openzro/openzro-archive-key.asc"
+```
+
+The `$basearch` in the rpm URL is expanded by dnf, not by Ansible, so
+leave it literal. The key still has to be the openZro signing key --
+`gpgcheck` and `repo_gpgcheck` stay on, and a mirror that re-signs
+packages needs its own key here instead.
+
+The dashboard container is a separate matter: on RHEL-family hosts it
+comes from `ghcr.io`, not from the package repo, so a mirrored registry
+needs `openzro_dashboard_image` pointed at it as well.
 
 ## Topology assumptions
 
@@ -312,6 +339,15 @@ drain/upgrade/undrain dance per host:
 ansible-playbook -i inventories/prod playbooks/update.yml \
     -e openzro_version=v0.53.1-alpha.97
 ```
+
+If you are chasing a release published in the last hour, add
+`-e openzro_force_cache_update=true`: the component roles install
+through `ansible.builtin.package`, which has no `update_cache` of its
+own and relies on the `common` role having refreshed the index earlier
+in the play. That refresh honours apt's one-hour `cache_valid_time`,
+and on dnf nothing else in the play refreshes metadata at all, so a
+just-published version can otherwise resolve against a stale index and
+fail with "no candidate".
 
 **Paste the version in whatever form you have it.** All of these mean
 the same thing to the roles:
