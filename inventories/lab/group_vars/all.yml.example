@@ -117,8 +117,9 @@ openzro_cloud: none   # none | aws | gcp
 # ---------------------------------------------------------------------
 openzro_log_level: "info"   # trace | debug | info | warn | error
 
-# Pin a specific release (without the "v" prefix). Leave unset to
-# install whatever the package manager considers latest in the openzro
-# repo. Use the TILDE spelling — that's how both repos version the
-# pre-releases; the `-alpha.86` form from the git tags matches nothing.
-# openzro_version: "0.53.1~alpha.86"
+# Pin a specific release. Leave unset to install whatever the package
+# manager considers latest in the openzro repo. Paste the version in
+# whatever form you have it — the git-tag spelling, the same without
+# the `v`, or the `~` form the packages carry all mean the same thing
+# to the roles.
+# openzro_version: "v0.53.1-alpha.97"

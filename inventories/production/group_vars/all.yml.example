@@ -37,7 +37,15 @@ openzro_tls_email: admin@example.com
 openzro_cloud: aws   # or gcp
 
 openzro_log_level: "info"
-openzro_version: "0.53.1-alpha.9"
+
+# Pin a specific release, or leave unset to install whatever the
+# package manager considers latest. Pinning is the right default for
+# production — an unpinned rolling update takes whatever shipped since.
+# Any spelling works: the git-tag form (`v0.53.1-alpha.97`), the same
+# without the `v`, or the `~` form the packages are published under.
+# Pick a version from https://github.com/openzro/openzro/releases
+# rather than copying one from here, which rots.
+# openzro_version: "v0.53.1-alpha.97"
 
 # ── Routing peers ─────────────────────────────────────────────
 # A single setup key shared by every host in the `routing_peer`
