@@ -81,18 +81,27 @@ server {
     client_max_body_size 32m;
 
     # Management gRPC. Path is the protobuf service FQN.
+    #
+    # The timeouts are deliberately far longer than any idle period a
+    # healthy stream can have: both of these streams are long-lived and
+    # mostly idle, and cutting one leaves the client believing it is
+    # still connected over a socket the server has already forgotten.
+    # A dead peer is detected by TCP keepalive instead — see
+    # grpc_socket_keepalive and the sysctls the role sets.
     location /management.ManagementService {
         grpc_pass grpc://openzro_management_grpc;
-        grpc_read_timeout 86400s;
-        grpc_send_timeout 86400s;
+        grpc_read_timeout {{ openzro_nginx_grpc_read_timeout }};
+        grpc_send_timeout {{ openzro_nginx_grpc_send_timeout }};
         grpc_socket_keepalive on;
     }
 
-    # Signal gRPC. Same protobuf-service-FQN convention.
+    # Signal gRPC. Same protobuf-service-FQN convention. This is the
+    # stream that idles longest — it carries data only while a peer
+    # connection is being set up.
     location /signalexchange.SignalExchange {
         grpc_pass grpc://openzro_signal_grpc;
-        grpc_read_timeout 86400s;
-        grpc_send_timeout 86400s;
+        grpc_read_timeout {{ openzro_nginx_grpc_read_timeout }};
+        grpc_send_timeout {{ openzro_nginx_grpc_send_timeout }};
         grpc_socket_keepalive on;
     }
 

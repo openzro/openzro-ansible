@@ -484,6 +484,24 @@ than scaling up).
   most operators terminate at LB for ACM/managed cert reasons.
   When passing through, nginx still does the TLS handshake.
 
+#### Don't shorten the gRPC timeouts
+
+The management `Sync` and signal `ConnectStream` are long-lived and
+mostly idle — signal's carries data only while a peer connection is
+being set up, so on a quiet mesh it can sit silent for days. Any proxy
+in the path that cuts an idle stream breaks the mesh in a way that is
+genuinely hard to diagnose: the client goes on reporting `Connected`
+over a socket the server has already forgotten, signal deregisters the
+peer, and messages addressed to it are dropped while the *sender* gets
+a 200. Nothing logs an error on either end.
+
+So `openzro_nginx_grpc_read_timeout` / `_send_timeout` default to `24d`
+rather than something that looks more reasonable, and a dead peer is
+detected by TCP keepalive instead (`openzro_nginx_tcp_keepalive_*`,
+~6.5 min). Idle is not dead. If you put your own LB or proxy in front,
+give it the same treatment — an LB idle timeout of 60s or 350s (the AWS
+NLB/ALB defaults) reintroduces exactly this failure.
+
 ## Routing peers (the `routing_peer` group)
 
 Routing peers are Linux hosts whose only job is to expose private

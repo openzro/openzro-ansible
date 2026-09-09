@@ -70,6 +70,45 @@ openzro_nginx_management_grpc_upstream: "127.0.0.1:33073"
 openzro_nginx_signal_grpc_upstream: "127.0.0.1:10000"
 
 # ---------------------------------------------------------------------
+# gRPC stream lifetime.
+#
+# The management Sync and signal ConnectStream are long-lived and
+# mostly idle — the signal one carries data only while a peer
+# connection is being set up, so on a quiet mesh it can idle for days.
+# A proxy timeout shorter than that tears the stream down without
+# either end noticing: the client keeps reporting "Connected" over a
+# socket that is gone, while signal has already deregistered the peer.
+# Messages addressed to it are then dropped, with a 200 returned to
+# the sender, until something restarts the client.
+#
+# 86400s was the old value and it is exactly the wrong one: it cuts a
+# healthy stream at 24h of silence. Idle is not dead. The timeout is
+# raised past any plausible idle period and death is detected instead
+# by TCP keepalive, below.
+#
+# 24d is a round "effectively never", not a limit — nginx parses far
+# larger values fine (verified: 25d also loads). It is deliberately not
+# 0/infinite, so a genuinely wedged stream still has a backstop.
+# ---------------------------------------------------------------------
+openzro_nginx_grpc_read_timeout: "24d"
+openzro_nginx_grpc_send_timeout: "24d"
+
+# TCP keepalive for the gRPC sockets. nginx's grpc_socket_keepalive
+# only flips SO_KEEPALIVE on; the timings come from these system-wide
+# sysctls, whose defaults (7200s idle, then 9 probes at 75s) leave a
+# vanished peer holding its stream for over two hours. At the values
+# below it is reaped in ~6.5 minutes.
+#
+# These are system-wide, not per-socket — every TCP connection on the
+# host gets them. That is fine for a dedicated proxy host and is the
+# only knob nginx exposes; set openzro_nginx_tune_tcp_keepalive to
+# false to leave the host's sysctls alone.
+openzro_nginx_tune_tcp_keepalive: true
+openzro_nginx_tcp_keepalive_time: 300
+openzro_nginx_tcp_keepalive_intvl: 30
+openzro_nginx_tcp_keepalive_probes: 3
+
+# ---------------------------------------------------------------------
 # TLS — pick a mode. The role implements four:
 #
 #   certbot_http  (default) — Let's Encrypt via HTTP-01. Host must be

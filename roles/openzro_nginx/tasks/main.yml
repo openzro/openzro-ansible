@@ -15,6 +15,31 @@
     name: "{{ openzro_nginx_package }}"
     state: present
 
+# nginx's grpc_socket_keepalive only sets SO_KEEPALIVE; the timings are
+# these system-wide sysctls. With the gRPC timeouts raised past any
+# plausible idle period, this is what actually reaps a vanished peer —
+# without it the default 7200s idle holds a dead stream for over two
+# hours. See the openzro_nginx_tcp_keepalive_* defaults for why this is
+# system-wide and how to opt out.
+- name: Tune TCP keepalive so dead gRPC peers are detected promptly
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/99-openzro-nginx-keepalive.conf
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    - name: net.ipv4.tcp_keepalive_time
+      value: "{{ openzro_nginx_tcp_keepalive_time }}"
+    - name: net.ipv4.tcp_keepalive_intvl
+      value: "{{ openzro_nginx_tcp_keepalive_intvl }}"
+    - name: net.ipv4.tcp_keepalive_probes
+      value: "{{ openzro_nginx_tcp_keepalive_probes }}"
+  loop_control:
+    label: "{{ item.name }} = {{ item.value }}"
+  when: openzro_nginx_tune_tcp_keepalive | bool
+
 - name: Ensure openzro tls dir exists
   ansible.builtin.file:
     path: /etc/openzro/tls
